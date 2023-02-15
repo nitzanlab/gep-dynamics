@@ -60,9 +60,3 @@ if not orig_adata_path.exists():
 
 # %%
 adata_nt.obs_keys()
-
-# %%
-from jupytext.config import global_jupytext_configuration_directories
-list(global_jupytext_configuration_directories())
-
-# %%
