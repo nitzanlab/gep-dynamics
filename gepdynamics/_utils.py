@@ -5,6 +5,7 @@ import os
 import typing
 import warnings
 
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -14,9 +15,10 @@ import seaborn as sns
 import h5py
 import scanpy as sc
 
+from scipy.cluster import hierarchy
 from scipy.sparse import csr_matrix
 
-from gepdynamics._constants import NON_NEG_CMAP 
+from gepdynamics._constants import NON_NEG_CMAP
 
 PathLike = typing.TypeVar('PathLike', str, bytes, os.PathLike)
 
@@ -50,6 +52,51 @@ def read_matlab_h5_sparse(filename: PathLike) -> csr_matrix:
         data = np.array(f['v']).flatten()
         
     return csr_matrix((data, (rows, cols)))
+
+
+# Scanpy AnnData objects related functions:
+def _create_usages_norm_adata(adata):
+    '''Given an adata with normalized usages of programs, create anndata'''
+    var = pd.DataFrame(index=adata.varm['usage_coefs'].columns)
+
+    with warnings.catch_warnings():  # supress 64 -> 32 float warning
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+        return sc.AnnData(
+            adata.obsm['usages_norm'].copy(), obs=adata.obs.copy(),
+            var=var.copy(), uns=deepcopy(adata.uns), obsm=deepcopy(adata.obsm))
+
+
+def plot_usages_norm_violin(
+        adata: sc.AnnData,
+        group_by_key: str,  # obs key
+        save_path: typing.Union[PathLike, None]=None,
+        close: bool=True
+) -> sc.plotting._baseplot_class.BasePlot:
+    u_data = _create_usages_norm_adata(adata)
+    u_data.obs[group_by_key] = pd.Categorical(
+        u_data.obs[group_by_key]).remove_unused_categories()
+    _sname = u_data.uns["sname"]
+
+    # Lineages hierarchical clustering
+    sc.tl.dendrogram(u_data, group_by_key, cor_method='spearman', use_rep='X')
+
+    # programs hierarchical clustering
+    linkage = hierarchy.linkage(
+        u_data.X.T, method='average', metric='correlation')
+    prog_order = hierarchy.leaves_list(hierarchy.optimal_leaf_ordering(
+        linkage, u_data.X.T))
+
+    vp = sc.pl.stacked_violin(
+        u_data, u_data.var_names[prog_order], groupby=group_by_key,
+        return_fig=True, dendrogram=True)
+    vp.fig_title = f'{u_data.uns["name"]} program usage per {group_by_key}'
+
+    if save_path is not None:
+        vp.savefig(save_path, dpi=180)
+    if close:
+        plt.close(vp.fig)
+
+    return vp
 
 
 # Scanpy code for creating color from categorical items: 
@@ -88,3 +135,91 @@ def plot_usages_norm_clustermaps(
     plt.close()
 
     return un_sns
+
+
+
+# Basic  plotting functions
+
+def heatmap(matrix, ax=None, param_dict=None, title=''):
+    '''prints a simple heatmap.
+
+    Parameters
+    ----------
+    matrix : ndarray
+        the 2D array to print
+    ax : plt.Axes
+        The axes to draw to. if none is givin creates a new image
+    param_dict : dict
+       Dictionary of kwargs to pass to ax.imshow
+
+    Returns
+    -------
+    plt.Axes - the axes on which the heatmap is drawn
+
+    Examples
+    --------
+    A = np.random.rand(4,5)
+    ax = heatmap(A)
+    '''
+    if param_dict is None:
+        param_dict = {}
+
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    im = ax.imshow(matrix, cmap=plt.cm.YlOrRd,
+                   interpolation='nearest', **param_dict)
+    ax.figure.colorbar(im, ax=ax)
+
+    ax.xaxis.tick_top()
+    ax.set_xticks(ticks=np.arange(matrix.shape[1]))
+
+    ax.set_yticks(ticks=np.arange(matrix.shape[0]))
+
+    ax.set_title(title)
+
+    return ax
+
+
+def heatmap_with_numbers(
+        matrix, ax=None, title='', param_dict={}):
+    '''prints a heatmap with cell values.
+
+    Parameters
+    ----------
+    matrix : ndarray
+        the 2D array to print
+    ax : plt.Axes
+        The axes to draw to. if none is givin creates a new image
+    param_dict : dict
+       Dictionary of kwargs to pass to ax.imshow
+
+    Returns
+    -------
+    plt.Axes - the axes on which the heatmap is drawn
+
+    Examples
+    --------
+    A = np.random.rand(4,5)
+    ax = heatmap_with_numbers(A)
+
+    '''
+    if param_dict is None:
+        param_dict = {}
+
+    if ax is None:
+        fig, ax = plt.subplots(1)
+    ax = heatmap(matrix=matrix, ax=ax, param_dict=param_dict)
+
+    ax.set_title(title)
+
+    # Loop over data dimensions and create text annotations.
+    for i in range(matrix.shape[0]):
+        for j in range(matrix.shape[1]):
+            if matrix[i, j] == 0:
+                val = 0
+            else:
+                val = np.round(matrix[i, j], decimals=2)
+            ax.text(j, i, val, ha="center", va="center", color="k")
+
+    return ax
