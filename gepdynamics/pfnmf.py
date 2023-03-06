@@ -31,15 +31,21 @@
 # CW @ GTCMT 2015
 
 import time
+import warnings
 
 import numpy as np
+
 from sklearn.decomposition import _nmf as sknmf
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.utils import check_random_state
 
 PRINT_EVERY = 10
 
-def pfnmf(X, w1, h1=None, w2=None, h2=None, rh: int=None,
-          beta_loss=1., tol: float=1e-4, max_iter: int=200, verbose=False):
-    '''Return the partially fixed NMF solution for constant w1 matrix'''
+
+def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
+          beta_loss=1., tol: float = 1e-4, max_iter: int = 200, verbose=False,
+          random_state=None):
+    """Return the partially fixed NMF solution for constant w1 matrix"""
 
     start_time = time.time()
 
@@ -47,53 +53,80 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rh: int=None,
     if beta_loss not in [1., 2. ]:
         raise NotImplementedError("pfnmf is only supported for beta in [1, 2]")
 
+    # Assert X has no zero rows or columns
+    m_features, n_samples = X.shape
+    if np.count_nonzero(X.sum(axis=0)) != n_samples:
+        raise ValueError(
+            f'X has an all-zeros sample')
+    if np.count_nonzero(X.sum(axis=1)) != m_features:
+        raise ValueError(
+            f'X has an all-zeros feature')
+    epsilon = np.finfo(X.dtype).eps
 
-    X += np.finfo(float).tiny  # make sure there's no zero frame
-    numFreqX, numFrames = X.shape
-    numFreqD, rd = w1.shape
-
-    # initialization
-    w1_update = 0
-    h1_update = 0
-    w2_update = 0
-    h2_update = 0
+    # Assert legal dimensions of w1 and w2 / rank_2 match
+    if m_features != w1.shape[0]:
+        raise ValueError(
+            f'First dimension of w1 {w1.shape} does not match X {X.shape}')
+    else:
+        _, rank_1 = w1.shape
 
     if w2 is not None:
-        numFreqH, rh = w2.shape
-    else:
-        w2 = np.random.rand(numFreqD, rh)
-        numFreqH, _ = w2.shape
-        w2_update = 1
+        if m_features != w2.shape[0]:
+            raise ValueError(
+                f'First dimension of w2 {w2.shape} does not match X {X.shape}')
+        if rank_2 is not None:
+            warnings.warn("Given w2 - ignoring rank_2 parameter")
+        _, rank_2 = w2.shape
+    elif rank_2 is None:
+        raise ValueError("One of {w2, rank_2} must be provided")
+    elif (rank_2 < 1) or (rank_2 % 1 != 0):
+        raise ValueError("rank_2 must be a positive integer")
 
-    if numFreqD != numFreqX:
-        raise ValueError('Dimensionality of the w1 does not match X')
-    elif numFreqH != numFreqX:
-        raise ValueError('Dimensionality of the w2 does not match X')
+    # Initialize w2/h1/h2 matrices if needed
+    if not (None not in [w2, h1, h2]):
+        # Following sknmf "random" NMF initiation, adjusting k*E(H)*E(W) ~ E(X)
+        avg_X = np.sqrt(X.mean() / (rank_1 + rank_2))
+        rng = check_random_state(random_state)
 
-    if h1 is not None:
-        w1_update = 1
-    else:
-        h1 = np.random.rand(rd, numFrames)
-        h1_update = 1
+        if w2 is None:
+            w2 = avg_X * rng.standard_normal(size=(m_features, rank_2)).astype(
+                X.dtype, copy=False)
+            np.abs(w2, out=w2)
+            w2 *= w1.mean() / w2.mean()  # adjusting E(w2) = E(w1)
 
-    if h2 is None:
-        h2 = np.random.rand(rh, numFrames)
-        h2_update = 1
+        if h1 is None:
+            h1 = avg_X * rng.standard_normal(size=(rank_1, n_samples)).astype(
+                X.dtype, copy=False)
+            np.abs(h1, out=h1)
+            h1 *= avg_X / (w1.mean() * h1.mean())
 
-    # normalize W / H matrix
-    for i in range(rd):
-        w1[:, i] = w1[:, i] / np.linalg.norm(w1[:, i], 1)
+        if h2 is None:
+            h2 = avg_X * rng.standard_normal(size=(rank_2, n_samples)).astype(
+                X.dtype, copy=False)
+            np.abs(h2, out=h2)
+            h2 *= avg_X / (w2.mean() * h2.mean())
 
-    for i in range(rh):
-        w2[:, i] = w2[:, i] / np.linalg.norm(w2[:, i], 1)
+    # Assert h1 and h2 dimensions
+    if h1.shape[0] != rank_1:
+        raise ValueError(
+            f"h1 n rows ({h1.shape[0]}) don't match w1 n columns {rank_1}")
+    if h1.shape[1] != n_samples:
+        raise ValueError(
+            f'Second dimension of h1 {h1.shape} does not match X {X.shape}')
+    if h2.shape[0] != rank_2:
+        raise ValueError(
+            f"h2 n rows ({h2.shape[0]}) don't match w2 / rank_2 {rank_2}")
+    if h2.shape[1] != n_samples:
+        raise ValueError(
+            f'Second dimension of h2 {h2.shape} does not match X {X.shape}')
 
-    rep = np.ones((numFreqX, numFrames))
+    rep = np.ones((m_features, n_samples))
 
-    def calc_error(w1, w2, h1, h2) -> float:
+    def calc_error(w_1, w_2, h_1, h_2) -> float:
         '''Calculate the error according to the beta loss and X'''
         return sknmf._beta_divergence(X,
-                                      np.concatenate([w1, w2], axis=1),
-                                      np.concatenate([h1, h2], axis=0),
+                                      np.concatenate([w_1, w_2], axis=1),
+                                      np.concatenate([h_1, h_2], axis=0),
                                       beta=beta_loss, square_root=True)
 
     error_at_init = calc_error(w1, w2, h1, h2)
@@ -102,49 +135,42 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rh: int=None,
     # start iterations
     for n_iter in range(1, max_iter + 1):
         # TODO: realize replacement of multipling @ rep with sum
-        # TODO: Fix the "h1_update" and friends - only allow one direction
 
+        approx = w1 @ h1 + w2 @ h2
         # update H
         if beta_loss == 1:   # KL
-            x_over_approx = X / (w1 @ h1 + w2 @ h2)
-            if h1_update:
-                h1 = h1 * (w1.T @ (x_over_approx)) / (w1.T @ rep)
-            if h2_update:
-                h2 = h2 * (w2.T @ (x_over_approx)) / (w2.T @ rep)
+            approx[approx < epsilon] = epsilon # avoid devision by zero
+            x_over_approx = X / approx
+            h1 = h1 * (w1.T @ x_over_approx) / (w1.T @ rep)
+            h2 = h2 * (w2.T @ x_over_approx) / (w2.T @ rep)
         elif beta_loss == 2:  # Frobenius
-            approx = w1 @ h1 + w2 @ h2
-            if h1_update:
-                h1 = h1 * (w1.T @ X) / (w1.T @ approx)
-            if h2_update:
-                h2 = h2 * (w2.T @ X) / (w2.T @ approx)
+            h1 = h1 * (w1.T @ X) / (w1.T @ approx)
+            h2 = h2 * (w2.T @ X) / (w2.T @ approx)
 
+        approx = w1 @ h1 + w2 @ h2
         # update W
         if beta_loss == 1:  # KL
-            x_over_approx = X / (w1 @ h1 + w2 @ h2)
-            if w1_update:
-                w1 = w1 * (x_over_approx @ h1.T) / (rep @ h1.T)
-            if w2_update:
-                w2 = w2 * (x_over_approx @ h2.T) / (rep @ h2.T)
-        elif beta_loss == 2:  # Frobenius
-            approx = w1 @ h1 + w2 @ h2
-            if w1_update:
-                w1 = w1 * (X @ h1.T) / (approx @ h1.T)
-            if w2_update:
-                w2 = w2 * (X @ h2.T) / (approx @ h2.T)
+            approx[approx < epsilon] = epsilon  # avoid devision by zero
+            x_over_approx = X / approx
+            w2 = w2 * (x_over_approx @ h2.T) / (rep @ h2.T)
+            # if w1_update:
+            #     w1 = w1 * (x_over_approx @ h1.T) / (rep @ h1.T)
 
-        # normalize W matrix
-        for i in range(rh):
-            w2[:, i] = w2[:, i] / np.linalg.norm(w2[:, i], 1)
-        for i in range(rd):
-            w1[:, i] = w1[:, i] / np.linalg.norm(w1[:, i], 1)
+        elif beta_loss == 2:  # Frobenius
+            w2 = w2 * (X @ h2.T) / (approx @ h2.T)
+            # if w1_update:
+            #     w1 = w1 * (X @ h1.T) / (approx @ h1.T)
 
         error = calc_error(w1, w2, h1, h2)
 
         # Making sure the loss is non-increasing
         if previous_error < error:
-            raise Exception("Increasing loss event, starting loss was "
-                            f"{error_at_init: .2e}, previous loss was "
-                            f"{previous_error} and current loss is {error}")
+            warnings.warn(
+                f"Increasing loss event, starting loss was "
+                f"{error_at_init: .3e}, previous loss was {previous_error: .3e}"
+                f"and current loss is {error: .3e}",
+                ConvergenceWarning)
+            break
 
         if tol > 0 and n_iter % PRINT_EVERY == 0:
             if verbose:
@@ -156,8 +182,6 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rh: int=None,
             break
         previous_error = error
 
-
-
     # do not print if we have already printed in the convergence test
     if verbose and (tol == 0 or n_iter % PRINT_EVERY != 0):
         end_time = time.time()
@@ -167,8 +191,7 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rh: int=None,
 
     return w1, h1, w2, h2, n_iter
 
-
 if __name__ == "__main__":
     # Basic test
-    pfnmf(np.array([[1., 1], [1, 0]]), np.array([[0.], [0.5]]), rh=1,
+    pfnmf(np.array([[1., 1], [1, 0]]), np.array([[0.], [0.5]]), rank_2=1,
           tol=0, max_iter=200, verbose=True)
