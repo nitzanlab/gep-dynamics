@@ -109,13 +109,13 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
     # Assert h1 and h2 dimensions
     if h1.shape[0] != rank_1:
         raise ValueError(
-            f"h1 n rows ({h1.shape[0]}) don't match w1 n columns {rank_1}")
+            f"h1 n rows ({h1.shape[0]}) don't match w1 n columns ({rank_1})")
     if h1.shape[1] != n_samples:
         raise ValueError(
             f'Second dimension of h1 {h1.shape} does not match X {X.shape}')
     if h2.shape[0] != rank_2:
         raise ValueError(
-            f"h2 n rows ({h2.shape[0]}) don't match w2 / rank_2 {rank_2}")
+            f"h2 n rows ({h2.shape[0]}) don't match w2 / rank_2 ({rank_2})")
     if h2.shape[1] != n_samples:
         raise ValueError(
             f'Second dimension of h2 {h2.shape} does not match X {X.shape}')
@@ -195,3 +195,4 @@ if __name__ == "__main__":
     # Basic test
     pfnmf(np.array([[1., 1], [1, 0]]), np.array([[0.], [0.5]]), rank_2=1,
           tol=0, max_iter=200, verbose=True)
+

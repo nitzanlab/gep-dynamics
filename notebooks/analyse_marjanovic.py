@@ -28,6 +28,9 @@
 # %load_ext autoreload
 # %autoreload 2
 
+#debug:
+from importlib import reload
+
 import sys
 import os
 from urllib.request import urlretrieve
@@ -42,7 +45,7 @@ from gepdynamics import _constants
 from gepdynamics import cnmf
 
 print(os.getcwd())
-os.chdir('/cs/labs/mornitzan/yotamcon/gep-dynamics')
+# os.chdir('/cs/labs/mornitzan/yotamcon/gep-dynamics')
 
 
 # %% [markdown]
@@ -117,16 +120,16 @@ pd.crosstab(adata.obs.timesimple, adata.obs.clusterK12)
 # ### Filter genes and plot basic statistics
 
 # %%
-# filtering genes with very low abundance
-sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 1000))
-sc.pp.filter_genes(adata, min_counts=40)
-
-# getting general statistics for counts abundance
-sc.pp.filter_cells(adata, min_counts=0)
-sc.pp.filter_cells(adata, min_genes=0)
-
-sc.pp.highly_variable_genes(adata, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
-adata
+# # filtering genes with very low abundance
+# sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 1000))
+# sc.pp.filter_genes(adata, min_counts=40)
+#
+# # getting general statistics for counts abundance
+# sc.pp.filter_cells(adata, min_counts=0)
+# sc.pp.filter_cells(adata, min_genes=0)
+#
+# sc.pp.highly_variable_genes(adata, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
+# adata
 
 # %%
 column_of_interest = 'timesimple'
@@ -139,7 +142,7 @@ stats_df = pd.concat([adata.obs.groupby([column_of_interest]).count().iloc[:, 0]
 stats_df.columns = ['# cells', 'median # genes', 'median # counts']
 
 stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, ylim=((1e2, 2e6)))
-
+plt.show()
 del column_of_interest, stats_df
 
 # %% [markdown]
@@ -161,10 +164,10 @@ for time in times:
         # correcting the gene counts
         sc.pp.filter_genes(tmp, min_cells=0)
         sc.pp.filter_genes(tmp, min_counts=0)
-        
+
         # calculating per sample HVGs
         sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
-        
+
         tmp.write_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
 
         del tmp
@@ -270,12 +273,15 @@ for time in times:
 #         columns=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
     
 #     split_adatas[time] = tmp
-    
+
 #     tmp.write_h5ad(split_adatas_dir.joinpath(f'{time}_GEPs.h5ad'))
 
 
-# %%
+# %% Loading GEPs adatas
 # %%time
+times = adata.obs.timesimple.cat.categories
+split_adatas_dir = _utils.set_dir(results_dir.joinpath('marjanovic_mmLungPlate_split'))
+
 split_adatas = {}
 for time in times:
     split_adatas[time] = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}_GEPs.h5ad'))
@@ -291,15 +297,23 @@ for time in times:
         print(s * 100 / s.sum())
 
 # %%
+# Plotting normalized usages clustermap
 for time in times:
     tmp = split_adatas[time]
-    
+    sname = tmp.uns["sname"]
+    k = tmp.obsm["usages"].shape[1]
+
     un_sns = _utils.plot_usages_norm_clustermaps(tmp, show=True)
-    plt.show(un_sns)
-    plt.close()
-    s = split_adatas[time].obsm['usages_norm'].sum(axis=0)
-    with np.printoptions(precision=2, suppress=False):
-        print(s * 100 / s.sum())
+    un_sns.savefig(results_dir.joinpath(
+        sname, f'{sname}.usages_norm.k_{k}.png'),
+        dpi=180, bbox_inches='tight')
+    plt.close(un_sns.fig)
+
+    _utils.plot_usages_norm_violin(
+        tmp, 'clusterK12', save_path=results_dir.joinpath(
+            sname, f'{sname}_norm_usage_per_lineage_k_{k}.png'))
+
+
 
 
 # %% [markdown]
@@ -313,4 +327,184 @@ for time in times:
     plt.title(f'{tmp.uns["name"]} Program 0 on Phate coordinates')
     plt.show()
     plt.close()
+
+# %%
+
+# sub-setting the genes:
+mutual_hvg = list(set().union(*[tmp.var[tmp.var.highly_variable].index \
+                          for time, tmp in split_adatas.items()]))
+mutual_hvg = list(set(mutual_hvg).intersection(*[tmp.var[tmp.var.highly_variable].index \
+                          for time, tmp in split_adatas.items()]))
+# mutual_hvg = adata.var[adata.var.highly_variable].index
+
+concatenated_spectras = pd.concat([
+    tmp.varm['usage_coefs'].loc[mutual_hvg].copy() for time, tmp in split_adatas.items()], axis=1)
+
+n_genes, n_programs = concatenated_spectras.shape
+
+pearson_corr = np.corrcoef(concatenated_spectras.T)
+
+# cosine figure
+fig, ax = plt.subplots(figsize=(4 + n_programs * 0.43, 4 + n_programs * 0.41))
+
+_utils.heatmap_with_numbers(
+    pearson_corr, ax=ax, param_dict={'vmin': 0, 'vmax': 1})
+
+ax.xaxis.tick_bottom()
+ax.set_xticklabels(concatenated_spectras.columns, rotation='vertical')
+ax.set_yticklabels(concatenated_spectras.columns)
+ax.set_title('Pearson correlation',
+             size=25, y=1.05, x=0.43)
+
+fig.savefig(results_dir.joinpath('correlation_pearson.png'),
+            dpi=180, bbox_inches='tight')
+plt.close(fig)
+
+
+# correlation histogram
+fig, ax = plt.subplots(figsize=(6, 5))
+
+plt.hist(pearson_corr[np.triu_indices_from(pearson_corr, k=1)],
+         bins=np.linspace(-1, 1, 41))
+ax.set_title('Pearson correlation distribution')
+plt.show()
+
+fig.savefig(results_dir.joinpath('correlation_histogtam_pearson.png'),
+            dpi=180, bbox_inches='tight')
+
+plt.close(fig)
+
+# 3.1b Calculating spearman correlation between usages coefficient
+
+from scipy.stats import rankdata
+N_COMPARED_RANKED = 1000
+
+ranked_coefs = n_genes - rankdata(concatenated_spectras, axis=0)
+
+ranked_coefs[ranked_coefs > N_COMPARED_RANKED] = N_COMPARED_RANKED
+
+spearman_corr = np.corrcoef(ranked_coefs, rowvar=False)
+
+# spearman figure
+fig, ax = plt.subplots(figsize=(4 + ranked_coefs.shape[1] * 0.43,
+                                4 + ranked_coefs.shape[1] * 0.41))
+
+_utils.heatmap_with_numbers(
+    spearman_corr, ax=ax, param_dict={'vmin': 0, 'vmax': 1})
+
+ax.xaxis.tick_bottom()
+ax.set_xticklabels(concatenated_spectras.columns, rotation='vertical')
+ax.set_yticklabels(concatenated_spectras.columns)
+ax.set_title(f'{N_COMPARED_RANKED}-Truncated Spearman Correlation',
+             size=25, y=1.05, x=0.43)
+
+fig.savefig(results_dir.joinpath(
+    f'correlation_spearman_{N_COMPARED_RANKED}_truncated.png'),
+    dpi=180, bbox_inches='tight')
+
+plt.close(fig)
+
+# correlation histogram
+fig, ax = plt.subplots(figsize=(6, 5))
+
+plt.hist(spearman_corr[np.triu_indices_from(spearman_corr, k=1)],
+         bins=np.linspace(0, 1, 21))
+ax.set_title('Spearman Correlation distribution')
+plt.show()
+
+fig.savefig(results_dir.joinpath(
+    f'correlation_histogtam_spearman_{N_COMPARED_RANKED}_truncated.png'),
+    dpi=180, bbox_inches='tight')
+
+plt.close(fig)
+
+# %%
+
+import matplotlib as mpl
+import networkx as nx
+from scipy.cluster import hierarchy
+
+threshold = 0.2
+
+# maping adata short name to layer number
+name_map = {}
+for i, time in enumerate(times):
+    name_map['t'+time[:2]] = i + 1
+
+ks = [tmp.obsm['usages_norm'].shape[1] for time, tmp in split_adatas.items()]
+
+# adjacency matrix creation and filtering
+
+adj_df = pd.DataFrame(np.round((spearman_corr + pearson_corr) / 2, 2),
+                      index=concatenated_spectras.columns,
+                      columns=concatenated_spectras.columns)
+
+# order
+linkage = hierarchy.linkage(
+    adj_df, method='average', metric='euclidean')
+prog_order = hierarchy.leaves_list(
+    hierarchy.optimal_leaf_ordering(linkage, adj_df))
+
+np.fill_diagonal(adj_df.values, 0)
+# adj_df.values[adj_df.values <= 0.0] = 0
+
+# keeping only edges between consecutive layers
+for i in range(len(ks) - 2):
+    adj_df.values[:np.sum(ks[:i + 1]), np.sum(ks[:i + 2]):] = 0
+    adj_df.values[np.sum(ks[:i + 2]):, :np.sum(ks[:i + 1])] = 0
+
+adj_df.values[adj_df.values <= threshold] = 0
+print(f'Number of edges={np.count_nonzero(adj_df)}')
+
+# ordering the nodes for display
+adj_df = adj_df.iloc[prog_order, prog_order]
+
+# create the graph object
+G = nx.from_numpy_array(adj_df.values, create_using=nx.Graph)
+nx.relabel_nodes(G, lambda i: adj_df.index[i], copy=False)
+nx.set_node_attributes(
+    G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
+
+# prepare graph for display
+layout = nx.multipartite_layout(G, subset_key='layer')
+
+edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
+edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
+
+for layer in {data['layer'] for key, data in G.nodes.data()}:
+    nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
+
+    angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+
+    for i, node in enumerate(nodes):
+        layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
+
+fig, ax = plt.subplots(1, 1, figsize=(16.4, 19.2), dpi=180)
+nx.draw(G, layout, node_size=1500, with_labels=False, edge_color=weights,
+        edge_vmin=threshold, edge_vmax=1., width=edge_width, ax=ax)
+
+cmp = mpl.cm.ScalarMappable(mpl.colors.Normalize(vmin=threshold, vmax=1))
+plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(15, 5, 71))
+
+# change color of layers
+for time, tmp in split_adatas.items():
+    nx.draw_networkx_nodes(
+        G, layout, node_color=adata.uns['timesimple_colors_dict'][time],
+        node_size=1400, nodelist=[f'{tmp.uns["sname"]}.p{i}' for i in range(
+            tmp.obsm['usages'].shape[1])], ax=ax)
+nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
+
+ax.set_title(f'Timepoint correlation graph, correlation threshold={threshold}',
+             {'fontsize': 25})
+plt.show()
+
+
+fig.savefig(results_dir.joinpath(
+    f'correlations_graph_threshold_{threshold}.png'),
+    dpi=180, bbox_inches='tight')
+
+plt.close()
+
+del name_map, G, edges, weights, i, layer, angles, node, nodes
+del fig, ax, layout, prog_order
 
