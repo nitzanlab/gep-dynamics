@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import sys
 import os
 import typing
 import warnings
@@ -18,12 +19,16 @@ import scanpy as sc
 from scipy.cluster import hierarchy
 from scipy.sparse import csr_matrix
 
-from gepdynamics._constants import NON_NEG_CMAP
+from gepdynamics._constants import NON_NEG_CMAP, PROJECT_HOME_PATH
 
 PathLike = typing.TypeVar('PathLike', str, bytes, os.PathLike)
 
 
 # General utilities
+def cd_proj_home():
+    os.chdir(PROJECT_HOME_PATH[sys.platform])
+
+
 def set_dir(path: PathLike) -> Path:
     '''Given a path to a directory, assert its existance or try to create it'''
     path = Path(path)

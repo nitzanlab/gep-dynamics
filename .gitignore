@@ -9,8 +9,8 @@ sample_code
 .ipynb_checkpoints/
 .idea/
 .spyproject/
-
-
+.jupyter_symlinks/
+_
 # data storing filetypes
 *.h5ad
 *.npy

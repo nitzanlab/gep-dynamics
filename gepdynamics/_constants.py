@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 from seaborn import cubehelix_palette
 
+PROJECT_HOME_PATH = {
+    'linux': '/cs/labs/mornitzan/yotamcon/gep-dynamics',
+    'darwin': '/Users/yotamcon/projects/gep-dynamics'}
 
 NUMBER_HVG = 2000
 
