@@ -26,6 +26,9 @@ PathLike = typing.TypeVar('PathLike', str, bytes, os.PathLike)
 
 # General utilities
 def cd_proj_home():
+    '''
+    Change directory to the project home directory as defined in gepdynamics/_constants
+    '''
     os.chdir(PROJECT_HOME_PATH[sys.platform])
 
 

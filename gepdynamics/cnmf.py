@@ -102,35 +102,59 @@ def var_sparse_matrix(X):
 
 
 def _nmf_torch_translate_kwargs(X, nmf_kwargs):
-    '''Translating keyword arguments to match torch-NMF requirements,
+    '''
+    Translating keyword arguments to match torch-NMF requirements,
     taking in all possible sklearn.decomposition non_negative_factorization,
     returning torchnmf_NMF_kwargs & torchnmf_fit_kwargs dictionaries
     '''
+    if 'torch' not in dir():
+        import torch
+    
     torchnmf_fit_kwargs = {}
     torchnmf_NMF_kwargs = {}
     
-    assert nmf_kwargs.get(
-        'n_components') is not None, "NMF keywords must contain n_components"
+    orig_w = nmf_kwargs.get('W')
+    orig_h = nmf_kwargs.get('H')
+    orig_rank = nmf_kwargs.get('n_components')
+
+    # Getting W, H.
+    if (orig_w is None) and (orig_h is None):
+        assert orig_rank, "NMF keywords must contain 'n_components' when W and H are not available"
+        
+        W, H = sknmf._initialize_nmf(X, orig_rank, init=nmf_kwargs.get('init'),
+                                     random_state=nmf_kwargs.get('random_state'))
     
-    # Getting W, H. torchnmf replaces the W and H, meaning V = H @ W.T
-    if (nmf_kwargs.get('W') is None) or (nmf_kwargs.get('H') is None):
-        W, H = skd._nmf._initialize_nmf(
-            X, nmf_kwargs['n_components'], init=nmf_kwargs.get('init'),
-            random_state=nmf_kwargs.get('random_state'))
-    if nmf_kwargs.get('H') is not None:
-        H = nmf_kwargs.get('H')
-    if nmf_kwargs.get('W') is not None:
-        W = nmf_kwargs.get('W')
+    elif (orig_w is not None) and (orig_h is not None):
+        W = orig_w
+        H = orig_h
     
+    elif orig_w is None:  # We were given H
+        H = orig_h
+        
+        assert (orig_rank is None) or (H.shape[0] == orig_rank), \
+            f"'n_components' ({orig_rank}) is different from the first dimension of H ({H.shape[0]})"
+        
+        W, _ = sknmf._initialize_nmf(X, H.shape[0], init=nmf_kwargs.get('init'),
+                                     random_state=nmf_kwargs.get('random_state'))
+        
+    else:   # we were given W
+        W = orig_w
+        
+        assert (orig_rank is None) or (W.shape[1] == orig_rank), \
+            f"'n_components' ({orig_rank}) is different from the second dimension of W ({W.shape[1]})"
+        
+        _, H = sknmf._initialize_nmf(X, W.shape[1], init=nmf_kwargs.get('init'),
+                                     random_state=nmf_kwargs.get('random_state'))
+    
+    # torchnmf replaces the W and H, for that module V = H @ W.T
     torchnmf_NMF_kwargs['W'] = torch.tensor(H.transpose())
     torchnmf_NMF_kwargs['H'] = torch.tensor(W)
     
-    if nmf_kwargs.get('update_H') is not None:
-        torchnmf_NMF_kwargs['trainable_W'] = nmf_kwargs.get('update_H')
+    torchnmf_NMF_kwargs['trainable_W'] = nmf_kwargs.get('update_H', True)
 
     # loss function:
     if nmf_kwargs.get('beta_loss') is not None:
-        torchnmf_fit_kwargs['beta'] = skd._nmf._beta_loss_to_float(
+        torchnmf_fit_kwargs['beta'] = sknmf._beta_loss_to_float(
             nmf_kwargs.get('beta_loss'))
 
     # tolerance:
@@ -158,7 +182,7 @@ def torch_to_np(tensor):
 
 def nmf_torch(X, nmf_kwargs, tens, verbose=False):
     """
-    Run nmf on a gpu
+    Wrapper for torchnmf (gpu), assimilating the keywords to sklearn nmf
     
     Parameters
     ----------
@@ -183,6 +207,10 @@ def nmf_torch(X, nmf_kwargs, tens, verbose=False):
     n_iter : int
         Actual number of iterations.
     """
+    if 'torch' not in dir():
+        import torch
+    if 'torchnmf' not in dir():
+        import torchnmf
 
     NMF_args, NMF_fit_kwargs = _nmf_torch_translate_kwargs(X, nmf_kwargs)
 
@@ -299,8 +327,7 @@ class cNMF():
             self.X = load_data_from_npz(self.paths['data'])
         
         # runtime imports
-        global skd, torch, torchnmf
-        import sklearn.decomposition as skd
+        global torch, torchnmf
         import torch
         assert torch.cuda.is_available()
         import torchnmf
