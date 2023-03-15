@@ -42,6 +42,13 @@ from sklearn.utils import check_random_state
 PRINT_EVERY = 10
 
 
+def calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss=1, square_root=False) -> float:
+    '''Calculate the error according to the beta loss and X'''
+    return sknmf._beta_divergence(X, np.concatenate([w_1, w_2], axis=1),
+                                  np.concatenate([h_1, h_2], axis=0),
+                                  beta=beta_loss, square_root=square_root)
+
+
 def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
           beta_loss=1., tol: float = 1e-4, max_iter: int = 200, verbose=False,
           random_state=None):
@@ -124,13 +131,13 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
 
     def calc_error(w_1, w_2, h_1, h_2) -> float:
         '''Calculate the error according to the beta loss and X'''
-        return sknmf._beta_divergence(X,
-                                      np.concatenate([w_1, w_2], axis=1),
-                                      np.concatenate([h_1, h_2], axis=0),
-                                      beta=beta_loss, square_root=True)
+        return calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss)
 
     error_at_init = calc_error(w1, w2, h1, h2)
     previous_error = error_at_init
+    
+    if verbose:
+        print(f"Starting error is {error_at_init: .3e}")
 
     # start iterations
     for n_iter in range(1, max_iter + 1):
@@ -167,8 +174,8 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
         if previous_error < error:
             warnings.warn(
                 f"Increasing loss event, starting loss was "
-                f"{error_at_init: .3e}, previous loss was {previous_error: .3e}"
-                f"and current loss is {error: .3e}",
+                f"{error_at_init: .3e}, previous loss was {previous_error: .4e}"
+                f"and current loss is {error: .4e}",
                 ConvergenceWarning)
             break
 
@@ -176,7 +183,7 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
             if verbose:
                 iter_time = time.time()
                 print(f"Epoch {n_iter: 02d} reached after "
-                f"{iter_time - start_time: .3f} seconds, error: {error: .2e}")
+                f"{iter_time - start_time: .3f} seconds, error: {error: .4e}")
 
         if (previous_error - error) / error_at_init < tol:
             break
@@ -187,7 +194,7 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
         end_time = time.time()
         error = calc_error(w1, w2, h1, h2)
         print(f"Epoch {n_iter: 02d} reached after "
-              f"{end_time - start_time: .3f} seconds, error: {error: .2e}")
+              f"{end_time - start_time: .3f} seconds, error: {error: .4e}")
 
     return w1, h1, w2, h2, n_iter
 
