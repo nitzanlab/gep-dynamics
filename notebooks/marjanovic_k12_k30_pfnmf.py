@@ -13,6 +13,22 @@
 #     name: python3
 # ---
 
+# %% [markdown]
+# # Running pfNMF on Marjanovic sample Kras30 using Kras 12
+# To estimates the aplicability of GEPs from the Kras sample at 12 weeks (K12) on the cells from Kras 30 weeks (K30), we use the K12 GEPs readjusted to the jointly highly variable genes (jHVGs) to decompose the K30 dataset using the partially fixed NMF algorithm (pfnmf)
+#
+# steps:
+# 1.  Loading the data
+# 2.  Finding jointly highly variable genes
+# 3.  Ruuning NNLS to get the K12 GEPs on the jHVGs
+# 4.  Decomposing the K30 dataset de-novo at the same rank as K12
+# 5.  Decomposing the K30 dataset using pfnmf with 0, 1, 2, 3 additional novel programs
+# 6.  Evaluating the usage patterns of the different decompositions
+# 7. 
+
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# ## Imports and loading data
+
 # %%
 # %%time
 # %load_ext autoreload
@@ -27,9 +43,11 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import matplotlib.pyplot as plt
+import networkx as nx
 
 from sklearn.decomposition import _nmf as sknmf
 from scipy.stats import rankdata
+from scipy.cluster import hierarchy
 
 from gepdynamics import _utils
 from gepdynamics import _constants
@@ -47,6 +65,7 @@ device = 'cuda'
 
 # %%
 results_dir = _utils.set_dir('results')
+notebook_dir = _utils.set_dir(results_dir.joinpath('marjanovic_k12_k30_pfnmf'))
 orig_adata_path = results_dir.joinpath('marjanovic_mmLungPlate.h5ad')
 split_adatas_dir = _utils.set_dir(results_dir.joinpath('marjanovic_mmLungPlate_split'))
 
@@ -62,10 +81,10 @@ k_12
 k_30 = sc.read_h5ad(split_adatas_dir.joinpath('05_K_30w_ND_GEPs.h5ad'))
 k_30
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ## Running pfNMF on K30 using the K12 GEPs
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Preparing K12 and K30 data on joint highly variable genes (jHVGs)
 #
 
@@ -97,7 +116,7 @@ X30 = sc.pp.scale(k_30[:, joint_K12_K30_HVG].X.toarray(), zero_center=False)
 print(f'X30.shape = {X30.shape}')
 X30[:4, :4]
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Running NNLS to get K12 GEPs (geps12) on jHVGs
 
 # %%
@@ -128,83 +147,100 @@ del tens
 geps12 = W.T
 geps12.shape
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Decomposing K30 de-novo with same rank as geps12 (on jHVGs)
 
 # %%
 pfnmf_results = {}
 rank_k12 = geps12.shape[0]
 
-# %%
-nmf_kwargs={
-    'n_components': rank_k12,
-    'tol': _constants.NMF_TOLERANCE,
-    'n_iter': max_iter,
-    'beta_loss': beta_loss
-   }
+# %% magic_args="--no-raise-error false" language="script"
+#
+# nmf_kwargs={
+#     'n_components': rank_k12,
+#     'tol': _constants.NMF_TOLERANCE,
+#     'n_iter': max_iter,
+#     'beta_loss': beta_loss
+#    }
+#
+# tens = torch.tensor(X30).to(device)
+#
+# W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=True)
+#
+# final_loss = sknmf._beta_divergence(X30, W, H, beta_loss)
+# print(f'Error per sample = {(final_loss / k_30.n_obs): .3e}')
+#
+# pfnmf_results['de_novo'] = {'W': W, 'H': H, 'n_iter': n_iter, 'final_loss': final_loss}
+#
+# del tens
 
-tens = torch.tensor(X30).to(device)
-
-W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=True)
-
-final_loss = sknmf._beta_divergence(X30, W, H, beta_loss)
-print(f'Error per sample = {(final_loss / k_30.n_obs): .3e}')
-
-pfnmf_results['de_novo'] = {'W': W, 'H': H, 'n_iter': n_iter, 'final_loss': final_loss}
-
-del tens
-
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Decomposing K30 with geps12 and no additional programs
 
-# %%
-#  x30 ~ W @ geps12
+# %% magic_args="--no-raise-error false" language="script"
+#
+# #  x30 ~ W @ geps12
+#
+# nmf_kwargs={'H': geps12.copy(),
+#             'update_H': False,
+#             'tol': _constants.NMF_TOLERANCE,
+#             'n_iter': max_iter,
+#             'beta_loss': beta_loss
+#            }
+#
+# tens = torch.tensor(X30).to(device)
+#
+# W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=True)
+#
+# final_loss = sknmf._beta_divergence(X30, W, H, beta_loss)
+# print(f'Error per sample = {(final_loss / k_30.n_obs): .3e}')
+#
+# pfnmf_results['k12'] = {'W': W, 'H': H, 'n_iter': n_iter, 'final_loss': final_loss}
+#
+# del tens
 
-nmf_kwargs={'H': geps12.copy(),
-            'update_H': False,
-            'tol': _constants.NMF_TOLERANCE,
-            'n_iter': max_iter,
-            'beta_loss': beta_loss
-           }
-
-tens = torch.tensor(X30).to(device)
-
-W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=True)
-
-final_loss = sknmf._beta_divergence(X30, W, H, beta_loss)
-print(f'Error per sample = {(final_loss / k_30.n_obs): .3e}')
-
-pfnmf_results['k12'] = {'W': W, 'H': H, 'n_iter': n_iter, 'final_loss': final_loss}
-
-del tens
-
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Decomposing K30 with geps12 and additional programs
 
+# %% magic_args="--no-raise-error false" language="script"
+#
+# # pfnmf is written for constant W_1, so we will transpose as needed:
+# # x30 ~ W_1 @ geps12 + W_2 @ H_2  <--> x30.T ~ geps12.T @ W_1.T + H_2.T @ W_2.T
+#
+# for added_rank in range(1, 5):
+#     print(f"Working on added rank = {added_rank}")
+#     
+#     best_loss = np.infty
+#     
+#     for repeat in range(20): 
+#         w1, h1, w2, h2, n_iter = pfnmf.pfnmf(X30.T, geps12.T, rank_2=added_rank, beta_loss=beta_loss,
+#             tol=_constants.NMF_TOLERANCE, max_iter=max_iter, verbose=False)
+#
+#         final_loss = pfnmf.calc_beta_divergence(X30.T, w1, w2, h1, h2, beta_loss)
+#         
+#         if final_loss <= best_loss:
+#             best_loss = final_loss
+#             pfnmf_results[f'k12e{added_rank}'] = {'w1': w1, 'h1': h1, 'w2': w2, 'h2': h2, 'n_iter': n_iter, 'final_loss': final_loss}
+#
+#             print(f"repeat {repeat}, after {n_iter} iterations reached {final_loss: .4e}"
+#                  f", per sample loss = {(final_loss / k_30.n_obs): .3e}")
+
+# %% magic_args="--no-raise-error false" language="script"
+#
+# np.savez_compressed(results_dir.joinpath('marjanovic_k12_k30_pfnmf.npz'), pfnmf_results=pfnmf_results)
+
 # %%
-# pfnmf is written for constant W_1, so we will transpose as needed:
-# x30 ~ W_1 @ geps12 + W_2 @ H_2  <--> x30.T ~ geps12.T @ W_1.T + H_2.T @ W_2.T
+loaded = np.load(results_dir.joinpath('marjanovic_k12_k30_pfnmf.npz'), allow_pickle=True)
+print([key for key in loaded.keys()])
 
-for added_rank in range(1, 5):
-    print(f"Working on added rank = {added_rank}")
-    
-    best_loss = np.infty
-    
-    for repeat in range(10): 
-        w1, h1, w2, h2, n_iter = pfnmf.pfnmf(X30.T, geps12.T, rank_2=added_rank, beta_loss=beta_loss,
-            tol=_constants.NMF_TOLERANCE, max_iter=max_iter, verbose=False)
+# %%
+pfnmf_results = loaded['pfnmf_results'].item()
 
-        final_loss = pfnmf.calc_beta_divergence(X30.T, w1, w2, h1, h2, beta_loss)
-        
-        if final_loss <= best_loss:
-            best_loss = final_loss
-            pfnmf_results[f'k12e{added_rank}'] = {'w1': w1, 'h1': h1, 'w2': w2, 'h2': h2, 'n_iter': n_iter, 'final_loss': final_loss}
-
-            print(f"repeat {repeat}, after {n_iter} iterations reached {final_loss: .4e}"
-                 f", per sample loss = {(final_loss / k_30.n_obs): .3e}")
-
-# %% [markdown]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # ## Evaluating the added programs
+
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# ### Preparing plotting parameters
 
 # %%
 columns_k12 = [f'k12.p{i}' for i in range(geps12.shape[0])]
@@ -212,7 +248,8 @@ sname = k_30.uns["sname"]
 
 coloring_scheme = {'de_novo': '#d62728', 'k12': '#2ca02c', 'k12e1': 'limegreen', 'k12e2': 'yellow', 'k12e3': 'orange', 'k12e4': 'chocolate'}
 
-pfnmf_results.keys()
+for key in pfnmf_results.keys():
+    print(f"{key}\t{pfnmf_results[key]['final_loss'] / 505: .0f}")
 
 
 # %%
@@ -246,10 +283,13 @@ for index, dict_key in enumerate(['k12e1', 'k12e2', 'k12e3', 'k12e4']):
     res_dict['prog_percent'] = res_dict['norm_usage'].sum(axis=0) * 100 / k_30.n_obs
 
     res_dict['prog_name'] = [f'k12e{added_rank}.p{i}' for i in range(rank_k12)]
-    res_dict['prog_name'].extend([f'e{added_rank}.p{i}' for i in range(added_rank)])
+    res_dict['prog_name'].extend([f'k12e{added_rank}.e{i}' for i in range(added_rank)])
     
     res_dict['prog_label_2l'] = [name + f'\n({res_dict["prog_percent"][i]: 0.1f}%)' for i, name in enumerate(res_dict['prog_name'])]
     res_dict['prog_label_1l'] = [name + f' ({res_dict["prog_percent"][i]: 0.1f}%)' for i, name in enumerate(res_dict['prog_name'])]   
+
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# ### usages clustermaps
 
 # %%
 dict_key = 'de_novo'
@@ -323,9 +363,6 @@ for dict_key1 in ['k12e1', 'k12e2', 'k12e3', 'k12e4']:
 # apply the usages clustermap function
 
 # %%
-res_dict0['prog_label_1l']
-
-# %%
 title = f'K_30 normalized usages of de-novo GEPs and k_12 GEPs {rank_k12} + [1, 2, 3] novel'
 
 dict_key0 = 'de_novo'
@@ -361,7 +398,7 @@ un_sns = _utils.sns.clustermap(pd.DataFrame(pearson_corr, index=joint_labels, co
 un_sns.figure.suptitle('Correlation of GEP usages', fontsize=40, y=1.02)
 plt.show()
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Extracting usage coefficients over all genes
 
 # %%
@@ -379,17 +416,93 @@ for dict_key in pfnmf_results.keys():
         _utils.fastols(res_dict['norm_usage'], k_30.layers[z_layer]).T,
         index=k_30.var.index,
         columns=res_dict['prog_name'])
-    
+
 
 # %%
 res_dict['gene_coefs']
+
+# %% [markdown] tags=[]
+# ### Running GO
+
+# %%
+gp = _utils.MyGProfiler(organism='hsapiens', sources=['GO:BP', 'WP', 'REAC', 'KEGG'])
+
+genes_list = adata.var.loc[k_30.var.index, 'geneSymbol'].to_list()
+
+
+# %% magic_args="--no-raise-error false" language="script"
+#
+# program_go_dir = _utils.set_dir(notebook_dir.joinpath('programs_GSEA'))
+#
+# for dict_key in pfnmf_results.keys():
+#     res_dict = pfnmf_results[dict_key]
+#     
+#     for index in range(res_dict['rank']):
+#         ordered_genes_index = res_dict['gene_coefs'].nlargest(
+#             columns=[res_dict['prog_name'][index]],
+#             n=1000).index
+#         ordered_genes = adata.var.loc[ordered_genes_index, 'geneSymbol'].to_list()
+#         
+#         go_enrichment = gp.profile( 
+#             ordered_genes, ordered=True, background=genes_list)
+#
+#         go_enrichment.to_csv(
+#             program_go_dir.joinpath(f"{res_dict['prog_name'][index]}.csv"))
+#
+
+
+# %%
+joint_HVG_geneID = set(joint_K12_K30_var[joint_K12_K30_var.highly_variable].index)
+k_30_HVG_geneID = set(k_30.var[k_30.var.highly_variable].index)
+union_HVG_geneID = k_30_HVG_geneID.union(joint_HVG_geneID)
+
+for dict_key in pfnmf_results.keys():
+    res_dict = pfnmf_results[dict_key]
+    for index in range(res_dict['rank']):
+        
+        
+        ordered_geneID = set(res_dict['gene_coefs'].nlargest(
+            columns=[res_dict['prog_name'][index]], n=1000).index)
+        print(res_dict['prog_name'][index],
+              len(set.intersection(ordered_geneID, joint_HVG_geneID)),
+              len(set.intersection(ordered_geneID, k_30_HVG_geneID)),
+              len(set.intersection(ordered_geneID, union_HVG_geneID))
+             )
+
+
+# %%
+# # %%script --no-raise-error false
+
+program_go_dir = _utils.set_dir(notebook_dir.joinpath('programs_GSEA_HVG'))
+
+for dict_key in pfnmf_results.keys():
+    res_dict = pfnmf_results[dict_key]
+    
+    for index in range(res_dict['rank']):
+        ordered_genes_index = res_dict['gene_coefs'].nlargest(
+            columns=[res_dict['prog_name'][index]],
+            n=1000).index
+        
+        ordered_genes_index = ordered_genes_index[ordered_genes_index.isin(joint_HVG_geneID)]
+        
+        ordered_genes = adata.var.loc[ordered_genes_index, 'geneSymbol'].to_list()
+        
+        go_enrichment = gp.profile( 
+            ordered_genes, ordered=True, background=genes_list)
+
+        go_enrichment.to_csv(
+            program_go_dir.joinpath(f"{res_dict['prog_name'][index]}.csv"))
+        
+#         break
+#     break
+# go_enrichment
 
 # %% [markdown] tags=[]
 # ### Calculating truncated spearman correlation
 #
 
 # %%
-keys = ['k12', 'k12e1', 'k12e2', 'k12e3']
+keys = ['k12', 'k12e1', 'k12e2', 'k12e3', 'de_novo']
 
 concatenated_spectras = pd.concat([
     pfnmf_results[dict_key]['gene_coefs'].copy() for dict_key in keys], axis=1)
@@ -429,7 +542,7 @@ plt.show(fig)
 # correlation histogram
 fig, ax = plt.subplots(figsize=(6, 5))
 
-plt.hist(spearman_corr[np.triu_indices_from(pearson_corr, k=1)],
+plt.hist(spearman_corr[np.triu_indices_from(spearman_corr, k=1)],
          bins=np.linspace(-1, 1, 41))
 ax.set_title('Spearman correlation distribution')
 plt.show()
@@ -440,6 +553,75 @@ plt.show()
 # plt.close(fig)
 
 # %%
-for key in pfnmf_results.keys():
-    print(key)
-    print(pfnmf_results[key]['final_loss'] / 505)
+threshold = 0.17
+
+# maping adata short name to layer number
+name_map = dict(zip(keys, range(len(keys))))
+name_map.update({'k30': name_map.pop('de_novo')})  # for the de_novo
+ks = [pfnmf_results[key]['rank'] for key in keys]
+
+# adjacency matrix creation and filtering
+adj_df = pd.DataFrame(np.round((spearman_corr), 2),
+                      index=concatenated_spectras.columns,
+                      columns=concatenated_spectras.columns)
+
+# order
+linkage = hierarchy.linkage(
+    adj_df, method='average', metric='euclidean')
+prog_order = hierarchy.leaves_list(
+    hierarchy.optimal_leaf_ordering(linkage, adj_df))
+
+np.fill_diagonal(adj_df.values, 0)
+# adj_df.values[adj_df.values <= 0.0] = 0
+
+# keeping only edges between consecutive layers
+for i in range(len(ks) - 2):
+    adj_df.values[:np.sum(ks[:i + 1]), np.sum(ks[:i + 2]):] = 0
+    adj_df.values[np.sum(ks[:i + 2]):, :np.sum(ks[:i + 1])] = 0
+
+adj_df.values[adj_df.values <= threshold] = 0
+print(f'Number of edges={np.count_nonzero(adj_df)}')
+
+# ordering the nodes for display
+adj_df = adj_df.iloc[prog_order, prog_order]
+
+# create the graph object
+G = nx.from_numpy_array(adj_df.values, create_using=nx.Graph)
+nx.relabel_nodes(G, lambda i: adj_df.index[i], copy=False)
+nx.set_node_attributes(
+    G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
+
+# prepare graph for display
+layout = nx.multipartite_layout(G, subset_key='layer')
+
+edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
+edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
+
+
+for layer in {data['layer'] for key, data in G.nodes.data()}:
+    nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
+
+    angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+    
+    for i, node in enumerate(nodes):
+        layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
+
+fig, ax = plt.subplots(1, 1, figsize=(16.4, 19.2), dpi=180)
+nx.draw(G, layout, node_size=3000, with_labels=False, edge_color=weights,
+        edge_vmin=threshold, edge_vmax=1., width=edge_width, ax=ax)
+
+cmp = plt.matplotlib.cm.ScalarMappable(plt.matplotlib.colors.Normalize(vmin=threshold, vmax=1))
+plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(15, 5, 71))
+
+# change color of layers
+for key in keys:
+    nx.draw_networkx_nodes(
+        G, layout, node_color=coloring_scheme[key], node_size=2800,
+        nodelist=pfnmf_results[key]['prog_name'], ax=ax)
+nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
+
+ax.set_title(f'Timepoint correlation graph, correlation threshold={threshold}',
+             {'fontsize': 25})
+plt.show()
+
+# %%

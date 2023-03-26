@@ -18,6 +18,7 @@ import scanpy as sc
 
 from scipy.cluster import hierarchy
 from scipy.sparse import csr_matrix
+from gprofiler import GProfiler
 
 from gepdynamics._constants import NON_NEG_CMAP, PROJECT_HOME_PATH
 
@@ -60,6 +61,100 @@ def read_matlab_h5_sparse(filename: PathLike) -> csr_matrix:
         data = np.array(f['v']).flatten()
         
     return csr_matrix((data, (rows, cols)))
+
+
+class MyGProfiler(GProfiler):
+    '''
+    Wrapper of the GProfiler class with special defaults
+
+    Examples
+    --------
+    >>> gp = utils.MyGProfiler()
+    >>> short_list = ['Nppa', 'Cox6a2', 'Atp5b', 'Atp2a2', 'Ndufa4',
+                      'Ldb3', 'Atp5a1', 'Atp5g3', 'Uqcr11', 'Kcnk3',
+                      'Ttn', 'Ryr2', 'Tmod1', 'Chchd10', 'Cox5a',
+                      'Cox7a1', 'Cox7a2', 'Fabp3', 'Myom2', 'Myl7',
+                      'Mdh1', 'Cox4i1', 'Sgcg', 'Cox6c', 'Cox8b',
+                      'Cox7c', 'Mb', 'Myh6', 'Actn2', 'Corin']
+    >>> enrichment = gp.profile(short_list, )
+    >>> enrichment_background = gp.profile(short_list, background=all_genes)
+    >>> orderd_background = gp.profile(ordered_genes, ordered=True,
+                       background=ordered_genes)
+
+    '''
+
+    def __init__(self, user_agent: str = '', base_url: str = None,
+                 return_dataframe: bool = True,
+                 organism: str = 'hsapiens', #'mmusculus', 
+                 sources: typing.List[str] = ['GO:BP', 'WP'],
+                 user_threshold: float = 0.001,
+                 ):
+        super().__init__(user_agent, base_url, return_dataframe)
+
+        self.default_profile_arguments = {
+            'organism': organism,
+            'user_threshold': user_threshold,
+            'sources': sources
+        }
+
+    @staticmethod
+    def calculate_enrichment(df: pd.DataFrame, ceil: int = 50):
+        '''calculate enrichment (n/b)/(N/B) on gprodile results dataframe'''
+        tmp = df.intersection_size * df.effective_domain_size \
+            / (df.term_size * df.query_size)
+        tmp[tmp > ceil] = ceil
+        return tmp
+
+    def profile(self, query: typing.Union[str, typing.List[str], typing.Dict[str, typing.List[str]]],
+                df_reordered: bool=True, **kwargs) -> pd.DataFrame:
+        """
+        performs functional profiling of gene lists using various kinds of
+        biological evidence. The tool performs statistical enrichment analysis
+        to find over-representation of information such as GO terms etc.
+
+        :param query: list of genes to profile. For running multiple queries at
+            once, accepts a dictionary of lists as well.
+        :param organism: Organism id for profiling. For full list see
+            https://biit.cs.ut.ee/gprofiler/page/organism-list
+        :param sources: List of annotation sources to include in analysis.
+            Defaults to all known.
+        :param user_threshold: Significance threshold for analysis.
+        :param all_results: If True, return all analysis results regardless of
+            statistical significance.
+        :param ordered: If True, considers the order of input query to be
+            significant. See
+            https://biit.cs.ut.ee/gprofiler/page/docs#ordered_gene_lists
+        :param no_evidences: If False, the results include lists of
+            intersections and evidences for the intersections
+        :param combined: If True, performs all queries and combines the results
+            into a single table. NB! changes the output format.
+        :param measure_underrepresentation: if True, performs test for
+            significantly under-represented functional terms.
+        :param no_iea: If True, excludes electronically annotated Gene Ontology
+            terms before analysis.
+        :param domain_scope: "known" for using all known genes as background,
+            "annotated" to use all genes annotated for particular datasource.
+        :param numeric_namespace: name for the numeric namespace to use if
+            there are numeric values in the query.
+        :param significance_threshold_method: method for multiple correction.
+            "g_SCS"|"bonferroni"|"fdr".
+            https://biit.cs.ut.ee/gprofiler/page/docs#significance_threhshold
+        :param background: List of genes to use as a statistical background.
+        :return: Dataframe of the results
+        """
+        args = {**deepcopy(self.default_profile_arguments), **kwargs}
+
+        result_df = super().profile(query=query, **args)
+        result_df['enrichment'] = self.calculate_enrichment(result_df)
+
+        if df_reordered:
+            return result_df[[
+                'native', 'name', 'p_value', 'enrichment', 'description',
+                'term_size', 'query_size', 'intersection_size',
+                'effective_domain_size', 'source']]
+
+        else:
+            return result_df
 
 
 # Basic  plotting functions
