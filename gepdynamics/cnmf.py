@@ -165,9 +165,8 @@ def _nmf_torch_translate_kwargs(X, nmf_kwargs):
     if nmf_kwargs.get('max_iter') is not None:
         torchnmf_fit_kwargs['max_iter'] = nmf_kwargs.get('max_iter')
 
-    # verbrose node:
-    if nmf_kwargs.get('verbose') is not None:
-        torchnmf_fit_kwargs['verbose'] = bool(nmf_kwargs.get('max_iter'))
+    # verbrosety mode 
+    torchnmf_fit_kwargs['verbose'] = nmf_kwargs.get('verbose', False)
 
     # working the arguments, regularization:
     if nmf_kwargs.get('alpha_W') is not None and nmf_kwargs['alpha_W'] > 0:

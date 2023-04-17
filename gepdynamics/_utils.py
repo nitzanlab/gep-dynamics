@@ -18,6 +18,7 @@ import scanpy as sc
 
 from scipy.cluster import hierarchy
 from scipy.sparse import csr_matrix
+from sklearn.metrics import jaccard_score
 from gprofiler import GProfiler
 
 from gepdynamics._constants import NON_NEG_CMAP, PROJECT_HOME_PATH
@@ -61,6 +62,49 @@ def read_matlab_h5_sparse(filename: PathLike) -> csr_matrix:
         data = np.array(f['v']).flatten()
         
     return csr_matrix((data, (rows, cols)))
+
+
+def df_jaccard_score(df: pd.DataFrame) -> np.ndarray:
+    """
+    Computes the Jaccard score between all pairs of boolean columns in a pandas DataFrame.
+
+    Parameters:
+        df (pd.DataFrame): The input pandas DataFrame. Must contain only boolean columns.
+
+    Returns:
+        np.ndarray: A symmetric matrix of shape (n_cols, n_cols) where each entry (i, j) represents
+            the Jaccard score between column i and column j.
+
+    Raises:
+        ValueError: If the input DataFrame contains non-boolean columns.
+
+    Example:
+        >>> import pandas as pd
+        >>> import numpy as np
+        >>> df = pd.DataFrame({
+        ...     'A': [True, False, True, False],
+        ...     'B': [True, True, False, False],
+        ...     'C': [False, True, True, False],
+        ...     'D': [False, False, True, True]
+        ... })
+        >>> df_jaccard_score(df)
+        array([[1.        , 0.25      , 0.25      , 0.33333333],
+               [0.25      , 1.        , 0.5       , 0.        ],
+               [0.25      , 0.5       , 1.        , 0.5       ],
+               [0.33333333, 0.        , 0.5       , 1.        ]])
+    """
+    if not all(df.dtypes == 'bool'):
+        raise ValueError('Input DataFrame must contain only boolean columns.')
+    
+    n_cols = len(df.columns)
+    scores = np.zeros((n_cols, n_cols))
+    for i in range(n_cols):
+        for j in range(n_cols):
+            if i <= j:  # to avoid computing the same pairs twice
+                scores[i, j] = jaccard_score(df.iloc[:, i], df.iloc[:, j])
+                scores[j, i] = scores[i, j]  # since it's a symmetric matrix
+    
+    return scores
 
 
 class MyGProfiler(GProfiler):

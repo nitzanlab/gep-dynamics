@@ -13,7 +13,7 @@
 #     name: python3
 # ---
 
-# %% [markdown]
+# %% [markdown] tags=[]
 # # Running pfNMF on Marjanovic sample Kras30 using Kras 12
 # To estimates the aplicability of GEPs from the Kras sample at 12 weeks (K12) on the cells from Kras 30 weeks (K30), we use the K12 GEPs readjusted to the jointly highly variable genes (jHVGs) to decompose the K30 dataset using the partially fixed NMF algorithm (pfnmf)
 #
@@ -24,9 +24,10 @@
 # 4.  Decomposing the K30 dataset de-novo at the same rank as K12
 # 5.  Decomposing the K30 dataset using pfnmf with 0, 1, 2, 3 additional novel programs
 # 6.  Evaluating the usage patterns of the different decompositions
-# 7. 
+# 7.  Evaluating the gene coefficients of the different GEPs from the different decompositions
+# 8.  Graphing the gene coefficinets correlations between the GEPs of the different decompositions.
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ## Imports and loading data
 
 # %%
@@ -84,7 +85,7 @@ k_30
 # %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ## Running pfNMF on K30 using the K12 GEPs
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Preparing K12 and K30 data on joint highly variable genes (jHVGs)
 #
 
@@ -116,7 +117,7 @@ X30 = sc.pp.scale(k_30[:, joint_K12_K30_HVG].X.toarray(), zero_center=False)
 print(f'X30.shape = {X30.shape}')
 X30[:4, :4]
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Running NNLS to get K12 GEPs (geps12) on jHVGs
 
 # %%
@@ -133,7 +134,7 @@ max_iter = 500
 nmf_kwargs={'H': k_12.obsm['usages'].T.copy(),
             'update_H': False,
             'tol': _constants.NMF_TOLERANCE,
-            'n_iter': max_iter,
+            'max_iter': max_iter,
             'beta_loss': beta_loss
            }
 
@@ -147,7 +148,7 @@ del tens
 geps12 = W.T
 geps12.shape
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Decomposing K30 de-novo with same rank as geps12 (on jHVGs)
 
 # %%
@@ -159,7 +160,7 @@ rank_k12 = geps12.shape[0]
 # nmf_kwargs={
 #     'n_components': rank_k12,
 #     'tol': _constants.NMF_TOLERANCE,
-#     'n_iter': max_iter,
+#     'max_iter': max_iter,
 #     'beta_loss': beta_loss
 #    }
 #
@@ -174,7 +175,7 @@ rank_k12 = geps12.shape[0]
 #
 # del tens
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Decomposing K30 with geps12 and no additional programs
 
 # %% magic_args="--no-raise-error false" language="script"
@@ -184,7 +185,7 @@ rank_k12 = geps12.shape[0]
 # nmf_kwargs={'H': geps12.copy(),
 #             'update_H': False,
 #             'tol': _constants.NMF_TOLERANCE,
-#             'n_iter': max_iter,
+#             'max_iter': max_iter,
 #             'beta_loss': beta_loss
 #            }
 #
@@ -199,7 +200,7 @@ rank_k12 = geps12.shape[0]
 #
 # del tens
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Decomposing K30 with geps12 and additional programs
 
 # %% magic_args="--no-raise-error false" language="script"
@@ -239,7 +240,7 @@ pfnmf_results = loaded['pfnmf_results'].item()
 # %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # ## Evaluating the added programs
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Preparing plotting parameters
 
 # %%
@@ -288,7 +289,7 @@ for index, dict_key in enumerate(['k12e1', 'k12e2', 'k12e3', 'k12e4']):
     res_dict['prog_label_2l'] = [name + f'\n({res_dict["prog_percent"][i]: 0.1f}%)' for i, name in enumerate(res_dict['prog_name'])]
     res_dict['prog_label_1l'] = [name + f' ({res_dict["prog_percent"][i]: 0.1f}%)' for i, name in enumerate(res_dict['prog_name'])]   
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### usages clustermaps
 
 # %%
@@ -365,14 +366,14 @@ for dict_key1 in ['k12e1', 'k12e2', 'k12e3', 'k12e4']:
 # %%
 title = f'K_30 normalized usages of de-novo GEPs and k_12 GEPs {rank_k12} + [1, 2, 3] novel'
 
-dict_key0 = 'de_novo'
+dict_key0 = 'k12'
 res_dict0 = pfnmf_results[dict_key0]
 
 joint_usages = res_dict0['norm_usage'].copy()
 joint_labels = res_dict0['prog_label_1l'].copy()
 joint_colors = [coloring_scheme[dict_key0]] * res_dict0['rank']
 
-for dict_key1 in ['k12', 'k12e1', 'k12e2', 'k12e3']:
+for dict_key1 in ['k12e1', 'k12e2', 'k12e3', 'de_novo']:
     res_dict1 = pfnmf_results[dict_key1]
     
     joint_usages = np.concatenate([joint_usages, res_dict1['norm_usage']], axis=1)
@@ -396,6 +397,84 @@ un_sns = _utils.sns.clustermap(pd.DataFrame(pearson_corr, index=joint_labels, co
                                row_colors=joint_colors, col_colors=joint_colors)
 
 un_sns.figure.suptitle('Correlation of GEP usages', fontsize=40, y=1.02)
+plt.show()
+
+# %%
+threshold = 0.2
+keys = ['k12', 'k12e1', 'k12e2', 'k12e3', 'de_novo']
+prog_names = []
+for key in keys:
+    prog_names.extend(pfnmf_results[key]['prog_name'].copy())
+
+
+# maping adata short name to layer number
+name_map = dict(zip(keys, range(len(keys))))
+name_map.update({'k30': name_map.pop('de_novo')})  # for the de_novo
+ks = [pfnmf_results[key]['rank'] for key in keys]
+
+# adjacency matrix creation and filtering
+adj_df = pd.DataFrame(np.round((pearson_corr), 2),
+                      index=prog_names,
+                      columns=prog_names)
+
+# order
+linkage = hierarchy.linkage(
+    adj_df, method='average', metric='euclidean')
+prog_order = hierarchy.leaves_list(
+    hierarchy.optimal_leaf_ordering(linkage, adj_df))
+
+np.fill_diagonal(adj_df.values, 0)
+# adj_df.values[adj_df.values <= 0.0] = 0
+
+# keeping only edges between consecutive layers
+for i in range(len(ks) - 2):
+    adj_df.values[:np.sum(ks[:i + 1]), np.sum(ks[:i + 2]):] = 0
+    adj_df.values[np.sum(ks[:i + 2]):, :np.sum(ks[:i + 1])] = 0
+
+adj_df.values[adj_df.values <= threshold] = 0
+print(f'Number of edges={np.count_nonzero(adj_df)}')
+
+# ordering the nodes for display
+adj_df = adj_df.iloc[prog_order, prog_order]
+
+# create the graph object
+G = nx.from_numpy_array(adj_df.values, create_using=nx.Graph)
+nx.relabel_nodes(G, lambda i: adj_df.index[i], copy=False)
+nx.set_node_attributes(
+    G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
+
+# prepare graph for display
+layout = nx.multipartite_layout(G, subset_key='layer')
+
+edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
+edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
+
+
+for layer in {data['layer'] for key, data in G.nodes.data()}:
+    nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
+
+    angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+    
+    for i, node in enumerate(nodes):
+        layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
+
+fig, ax = plt.subplots(1, 1, figsize=(16.4, 19.2), dpi=100)
+nx.draw(G, layout, node_size=3000, with_labels=False, edge_color=weights,
+        edge_vmin=threshold, edge_vmax=1., width=edge_width, ax=ax)
+
+cmp = plt.matplotlib.cm.ScalarMappable(plt.matplotlib.colors.Normalize(vmin=threshold, vmax=1))
+plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(15, 5, 71))
+
+# change color of layers
+for key in keys:
+    nx.draw_networkx_nodes(
+        G, layout, node_color=coloring_scheme[key], node_size=2800,
+        nodelist=pfnmf_results[key]['prog_name'], ax=ax)
+nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
+
+ax.set_title(f'Timepoint usages Pearson correlation graph, correlation threshold={threshold}',
+             {'fontsize': 25})
+
 plt.show()
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
@@ -470,34 +549,33 @@ for dict_key in pfnmf_results.keys():
              )
 
 
-# %%
-# # %%script --no-raise-error false
+# %% magic_args="--no-raise-error false" language="script"
+#
+# program_go_dir = _utils.set_dir(notebook_dir.joinpath('programs_GSEA_HVG'))
+#
+# for dict_key in pfnmf_results.keys():
+#     res_dict = pfnmf_results[dict_key]
+#     
+#     for index in range(res_dict['rank']):
+#         ordered_genes_index = res_dict['gene_coefs'].nlargest(
+#             columns=[res_dict['prog_name'][index]],
+#             n=1000).index
+#         
+#         ordered_genes_index = ordered_genes_index[ordered_genes_index.isin(joint_HVG_geneID)]
+#         
+#         ordered_genes = adata.var.loc[ordered_genes_index, 'geneSymbol'].to_list()
+#         
+#         go_enrichment = gp.profile( 
+#             ordered_genes, ordered=True, background=genes_list)
+#
+#         go_enrichment.to_csv(
+#             program_go_dir.joinpath(f"{res_dict['prog_name'][index]}.csv"))
+#         
+# #         break
+# #     break
+# # go_enrichment
 
-program_go_dir = _utils.set_dir(notebook_dir.joinpath('programs_GSEA_HVG'))
-
-for dict_key in pfnmf_results.keys():
-    res_dict = pfnmf_results[dict_key]
-    
-    for index in range(res_dict['rank']):
-        ordered_genes_index = res_dict['gene_coefs'].nlargest(
-            columns=[res_dict['prog_name'][index]],
-            n=1000).index
-        
-        ordered_genes_index = ordered_genes_index[ordered_genes_index.isin(joint_HVG_geneID)]
-        
-        ordered_genes = adata.var.loc[ordered_genes_index, 'geneSymbol'].to_list()
-        
-        go_enrichment = gp.profile( 
-            ordered_genes, ordered=True, background=genes_list)
-
-        go_enrichment.to_csv(
-            program_go_dir.joinpath(f"{res_dict['prog_name'][index]}.csv"))
-        
-#         break
-#     break
-# go_enrichment
-
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Calculating truncated spearman correlation
 #
 
