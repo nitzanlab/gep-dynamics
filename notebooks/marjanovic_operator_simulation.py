@@ -28,7 +28,7 @@
 # 10. Perform pfnmf with 1, 2, 3 extra GEPs of K12_0 using K12_m_p[#] GEPs (gain of GEP operator)
 #
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Imports and Data Loading
 
 # %%
@@ -79,7 +79,7 @@ split_adatas_dir = _utils.set_dir(results_dir.joinpath('marjanovic_mmLungPlate_s
 # sc.external.pl.phate(adata, color=['clusterK12', 'timesimple'])
 # adata
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 1. Decomposing the data
 
 # %%
@@ -128,11 +128,7 @@ usages[usages < np.finfo(usages.dtype).eps**2] = 0
 geps.shape
 
 
-# %%
-print(f'Error per sample = {(sknmf._beta_divergence(X, usages, geps, beta_loss) / subdata.n_obs): .1f}')
-
-
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # ### 2. Recompose the data and sample counts from Poisson with $WH$ rates
 
 # %%
@@ -157,9 +153,10 @@ print(f'Resampled data error per sample = {ns.data_error: .1f}')
 print(f'non-zero entries of original data is {np.count_nonzero(X) * 100 / np.multiply(*X.shape): .1f}%')
 print(f'non-zero entries of resampled data is {np.count_nonzero(ns.data) * 100 / np.multiply(*ns.data.shape): .1f}%')
 
+# print the keys gained per experiment this far
 vars(ns).keys()
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 3. Recomposing the data without one GEP and sampling counts from Poisson
 
 # %%
@@ -222,7 +219,7 @@ for name, ns in recompositions.items():
     print(ns.H.sum(axis=0).min())
     print(ns.W.sum(axis=1).min())
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 4. Use NMF to decompose the resampled datasets
 
 # %%
@@ -287,9 +284,9 @@ for name, ns in recompositions.items():
     
     # Normalized usage
     ns.W_nmf_proportion = ns.W_nmf_proportion @ perm.T
-    
 
-# %% [markdown] tags=[]
+
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 5. Compare the usages to the original
 #
 
@@ -308,7 +305,7 @@ for name, ns in recompositions.items():
     plt.close()
 
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 6. Compare the genes to the original
 
 # %%
@@ -319,15 +316,11 @@ subdata.layers[z_layer] = sc.pp.normalize_total(subdata, target_sum=1e6, inplace
 sc.pp.log1p(subdata, layer=z_layer)
 sc.pp.scale(subdata, layer=z_layer)
 
-# %%
-orig_ns = recompositions[f'{sname}_0']
-
 orig_ns.data_gene_coefs = pd.DataFrame(
     _utils.fastols(orig_ns.W_nmf_proportion, subdata.layers[z_layer]).T,
     index=subdata.var.index,
     columns=orig_ns.data_prog_names)
 
-# %%
 for name, ns in recompositions.items():
     ns.nmf_gene_coefs = pd.DataFrame(
         _utils.fastols(ns.W_nmf_proportion, subdata.layers[z_layer]).T,
@@ -335,8 +328,6 @@ for name, ns in recompositions.items():
         columns=ns.nmf_prog_names)
 
 # %%
-orig_ns = recompositions[f'{sname}_0']
-
 for name, ns in recompositions.items():
     concatenated_spectras = pd.concat([orig_ns.data_gene_coefs, ns.nmf_gene_coefs], axis=1)
 
@@ -360,7 +351,7 @@ for name, ns in recompositions.items():
     plt.close()
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 7. Perform decomposition of K12_m_p[#] using K12 GEPs (loss of GEP operator)
 
 # %%
@@ -393,8 +384,9 @@ for name, ns in recompositions.items():
     print()
 
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # #### usages comparisons
+# Results came out clear as expected
 
 # %%
 for name, ns in recompositions.items():
@@ -427,8 +419,9 @@ for name, ns in recompositions.items():
     plt.close(un_sns.figure)
 
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # #### Gene coefficients comparison
+# Surprisingly, a lot of information was retained for dropped GEPs both with beta coefficients and jaccard score
 
 # %%
 # Extracting gene coefficients from resampled data:
@@ -545,8 +538,6 @@ for name, ns in recompositions.items():
 # %%
 #  k12_0.data ~ W @ k12_m_p[].H_nmf
 
-orig_ns = recompositions[f'{sname}_0']
-
 for name, ns in recompositions.items():
     print('working on ', ns.name)
     
@@ -571,8 +562,9 @@ for name, ns in recompositions.items():
     
     print()
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # #### usages comparisons
+# Results: other GEPs seem to "take charge" of cells that were primarily using a dropped GEP
 
 # %%
 for name, ns in recompositions.items():
@@ -605,8 +597,9 @@ for name, ns in recompositions.items():
     plt.close(un_sns.figure)
 
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # #### Gene coefficients comparison
+# Results: some low correlation arrives from the GEP that is used to "cover" for the dropped one
 
 # %%
 # Extracting gene coefficients from resampled data:
@@ -692,8 +685,9 @@ for name, ns in recompositions.items():
     plt.show()
     plt.close()
 
-# %% [markdown]
+# %% [markdown] tags=[]
 # ### 9. Perform pfnmf with 1, 2, 3 extra GEPs of K12_m_p[#] using K12_0 GEPs (loss of GEP operator)
+# Results: as expected, additional degrees of freedom add little to the final loss
 
 # %%
 # # %%script --no-raise-error false
@@ -701,8 +695,10 @@ for name, ns in recompositions.items():
 # pfnmf is written for constant W_1, so we will transpose as needed:
 # K12_m_p[#] ~ W_1 @ k12_0.H + W_2 @ H_2  <--> K12_m_p[#].T ~ k12_0.H.T @ W_1.T + H_2.T @ W_2.T
 
+pfnmf_repeats = 3
+
 for name, ns in recompositions.items():
-    print('working on ', ns.name)
+    print('working on ', ns.name, f'original loss was {ns.pfnmf_error[0]: .1f}' )
     ns.pfnmf = [0, 1, 2, 3]
     
     if len(ns.pfnmf_error) == 1:
@@ -714,16 +710,16 @@ for name, ns in recompositions.items():
 
         best_loss = np.infty
         
-        for repeat in range(1):
+        for repeat in range(pfnmf_repeats):
             X = ns.data.T
             X[:, (X.sum(axis=0)==0)] += np.finfo(float).eps
             X[(X.sum(axis=1)==0), :] += np.finfo(float).eps
             
             w1, h1, w2, h2, n_iter = pfnmf.pfnmf(
-                ns.data.T, orig_ns.H_nmf.T, rank_2=added_rank, beta_loss=beta_loss,
+                X, orig_ns.H_nmf.T, rank_2=added_rank, beta_loss=beta_loss,
                 tol=_constants.NMF_TOLERANCE, max_iter=max_iter, verbose=False)
 
-            final_loss = pfnmf.calc_beta_divergence(ns.data.T, w1, w2, h1, h2, beta_loss)
+            final_loss = pfnmf.calc_beta_divergence(X, w1, w2, h1, h2, beta_loss)
 
             if final_loss <= best_loss:
                 best_loss = final_loss
@@ -732,9 +728,12 @@ for name, ns in recompositions.items():
 
                 print(f"repeat {repeat}, after {n_iter} iterations reached {final_loss: .4e}"
                      f", per sample loss = {ns.pfnmf_error[added_rank]: .1f}")
+    print()
 
-# %% [markdown]
+
+# %% [markdown] tags=[]
 # ### 10. Perform pfnmf with 1, 2, 3 extra GEPs of K12_0 using K12_m_p[#] GEPs (gain of GEP operator)
+# Results: after adding just one more GEP we get similar loss to the baseline
 
 # %%
 # # %%script --no-raise-error false
@@ -742,12 +741,14 @@ for name, ns in recompositions.items():
 # pfnmf is written for constant W_1, so we will transpose as needed:
 # k12_0 ~ W_1 @ K12_m_p[#].H_nmf + W_2 @ H_2  <--> k12_0.T ~ K12_m_p[#].H_nmf.T @ W_1.T + H_2.T @ W_2.T
 
+pfnmf_repeats = 3
+
 X = orig_ns.data.T
 X[:, (X.sum(axis=0)==0)] += np.finfo(float).eps
 X[(X.sum(axis=1)==0), :] += np.finfo(float).eps
 
 for name, ns in recompositions.items():
-    print('working on ', ns.name)
+    print('working on ', ns.name, f', original loss was {ns.gain_pfnmf_error[0]: .1f}')
     ns.gain_pfnmf = [0, 1, 2, 3]
     
     if len(ns.gain_pfnmf_error) == 1:
@@ -759,12 +760,12 @@ for name, ns in recompositions.items():
 
         best_loss = np.infty
         
-        for repeat in range(1):
+        for repeat in range(pfnmf_repeats):
             w1, h1, w2, h2, n_iter = pfnmf.pfnmf(
-                ns.data.T, ns.H_nmf.T, rank_2=added_rank, beta_loss=beta_loss,
+                X, ns.H_nmf.T, rank_2=added_rank, beta_loss=beta_loss,
                 tol=_constants.NMF_TOLERANCE, max_iter=max_iter, verbose=False)
 
-            final_loss = pfnmf.calc_beta_divergence(orig_ns.data.T, w1, w2, h1, h2, beta_loss)
+            final_loss = pfnmf.calc_beta_divergence(X, w1, w2, h1, h2, beta_loss)
 
             if final_loss <= best_loss:
                 best_loss = final_loss
@@ -772,7 +773,7 @@ for name, ns in recompositions.items():
                 ns.gain_pfnmf_error[added_rank] = final_loss / subdata.n_obs
 
                 print(f"repeat {repeat}, after {n_iter} iterations reached {final_loss: .4e}"
-                     f", per sample loss = {ns.pfnmf_error[added_rank]: .1f}")
+                     f", per sample loss = {ns.gain_pfnmf_error[added_rank]: .1f}")
+    print()
 
 # %%
-vars(ns).keys()
