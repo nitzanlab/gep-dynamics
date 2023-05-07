@@ -202,6 +202,38 @@ class MyGProfiler(GProfiler):
 
 
 # Basic  plotting functions
+def floats_to_colors(floats_array: np.ndarray, cmap: str = 'coolwarm', vmin=None, vmax=None) -> np.ndarray:
+    """
+    Convert an array of floats to an array of hexadecimal colors using a specified colormap.
+
+    Parameters:
+    -----------
+    floats_array: np.ndarray
+        Array of floats to be converted to colors.
+
+    cmap: str, optional (default: 'coolwarm')
+        Name of the colormap to be used for the conversion. 
+        Default is 'coolwarm'.
+    
+    vmin: float, optional (default: None)
+        The minimum value for the normalization of the input values.
+        If not specified, the minimum value of the input array will be used.
+
+    vmax: float, optional (default: None)
+        The maximum value for the normalization of the input values.
+        If not specified, the maximum value of the input array will be used.
+        
+    Returns:
+    --------
+    np.ndarray
+        Array of hexadecimal color codes corresponding to each float value in the input array.
+    """    
+    cmap = plt.matplotlib.cm.get_cmap(cmap)
+    norm = plt.matplotlib.colors.Normalize(vmin=(vmin or floats_array.min()), vmax=(vmax or floats_array.max()))
+    rgba_colors = cmap(norm(floats_array))
+    
+    return np.array([ plt.matplotlib.colors.rgb2hex(rgba_colors[i,:]) for i in range(rgba_colors.shape[0]) ])
+
 
 def heatmap(matrix, ax=None, cmap=plt.cm.hot, param_dict=None, title=''):
     '''prints a simple heatmap.

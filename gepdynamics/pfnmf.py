@@ -33,6 +33,8 @@
 import time
 import warnings
 
+from typing import Union
+
 import numpy as np
 
 from sklearn.decomposition import _nmf as sknmf
@@ -42,11 +44,51 @@ from sklearn.utils import check_random_state
 PRINT_EVERY = 10
 
 
-def calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss=1, square_root=False) -> float:
-    '''Calculate the error according to the beta loss and X'''
-    return sknmf._beta_divergence(X, np.concatenate([w_1, w_2], axis=1),
-                                  np.concatenate([h_1, h_2], axis=0),
-                                  beta=beta_loss, square_root=square_root)
+def calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss=1, square_root=False, per_column=False) -> Union[float, np.ndarray]:
+    '''
+    Calculate the beta divergence error between the original matrix X and the product of 
+    the two non-negative matrices W and H, using the given beta loss parameter.
+
+    Parameters:
+    ----------
+    X : array-like
+        The original matrix to be factorized.
+    w_1, w_2 : array-like
+        The factor matrices to be multiplied to form W.
+    h_1, h_2 : array-like
+        The factor matrices to be multiplied to form H.
+    beta_loss : float or {'frobenius', 'kullback-leibler', 'itakura-saito'}
+        Parameter of the beta-divergence.
+        If beta == 2, this is half the Frobenius *squared* norm.
+        If beta == 1, this is the generalized Kullback-Leibler divergence.
+        If beta == 0, this is the Itakura-Saito divergence.
+        Else, this is the general beta-divergence.
+    square_root : bool, default=False
+        If True, return np.sqrt(2 * res)
+        For beta == 2, it corresponds to the Frobenius norm.
+    per_column : bool, optional (default=False)
+        Whether to calculate the divergence error per column of X.
+
+    Returns:
+    -------
+    Union[float, numpy.ndarray]
+        If per_column is False, returns the overall beta divergence error between X and W*H.
+        If per_column is True, returns an array of the beta divergence errors between each column
+        of X and the corresponding column of W*H.
+    '''
+    W = np.concatenate([w_1, w_2], axis=1)
+    H = np.concatenate([h_1, h_2], axis=0)
+    
+    if not per_column:
+        return sknmf._beta_divergence(X, W, H, beta=beta_loss, square_root=square_root)
+    else:
+        result = np.full((X.shape[1]), np.inf)
+        
+        for col in range(X.shape[1]):
+            result[col] = sknmf._beta_divergence(
+                X[:, col: col + 1], W, H[:, col: col + 1], beta=beta_loss, square_root=square_root)
+
+        return result
 
 
 def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,

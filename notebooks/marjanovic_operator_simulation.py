@@ -28,7 +28,7 @@
 # 10. Perform pfnmf with 1, 2, 3 extra GEPs of K12_0 using K12_m_p[#] GEPs (gain of GEP operator)
 #
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Imports and Data Loading
 
 # %%
@@ -65,11 +65,13 @@ print(os.getcwd())
 rng = np.random.default_rng()
 
 # %%
+# %%time
 import torch
 assert torch.cuda.is_available()
 device = 'cuda'
 
 # %%
+# %%time
 results_dir = _utils.set_dir('results')
 notebook_dir = _utils.set_dir(results_dir.joinpath('marjanovic_operator_simulation'))
 orig_adata_path = results_dir.joinpath('marjanovic_mmLungPlate.h5ad')
@@ -79,7 +81,7 @@ split_adatas_dir = _utils.set_dir(results_dir.joinpath('marjanovic_mmLungPlate_s
 # sc.external.pl.phate(adata, color=['clusterK12', 'timesimple'])
 # adata
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### 1. Decomposing the data
 
 # %%
@@ -128,7 +130,7 @@ usages[usages < np.finfo(usages.dtype).eps**2] = 0
 geps.shape
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 2. Recompose the data and sample counts from Poisson with $WH$ rates
 
 # %%
@@ -148,15 +150,18 @@ recompositions[dict_key] = ns
 ns.data = rng.poisson(lam=(ns.W @ ns.H)).astype(X.dtype)
 
 ns.data_error = sknmf._beta_divergence(ns.data, ns.W, ns.H, beta_loss) / subdata.n_obs
+ns.data_loss_per_cell = pfnmf.calc_beta_divergence(ns.data.T, ns.H.T, np.zeros((ns.H.shape[1], 0)), ns.W.T, np.zeros((0, ns.W.shape[0])), per_column=True)
+
 print(f'Resampled data error per sample = {ns.data_error: .1f}')
 
 print(f'non-zero entries of original data is {np.count_nonzero(X) * 100 / np.multiply(*X.shape): .1f}%')
 print(f'non-zero entries of resampled data is {np.count_nonzero(ns.data) * 100 / np.multiply(*ns.data.shape): .1f}%')
 
+
 # print the keys gained per experiment this far
 vars(ns).keys()
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### 3. Recomposing the data without one GEP and sampling counts from Poisson
 
 # %%
@@ -204,6 +209,7 @@ for dropped_GEP_index in range(usages.shape[1]):
             ns.data[rng.multinomial(1, multinomial_proporitons), gene_index] += 1
         
     ns.data_error = sknmf._beta_divergence(ns.data, ns.W, ns.H, beta_loss) / subdata.n_obs
+    ns.data_loss_per_cell = pfnmf.calc_beta_divergence(ns.data.T, ns.H.T, np.zeros((ns.H.shape[1], 0)), ns.W.T, np.zeros((0, ns.W.shape[0])), per_column=True)
     
     print(f'Resampled data error per sample = {ns.data_error: .1f}')
 
@@ -212,14 +218,29 @@ for dropped_GEP_index in range(usages.shape[1]):
     recompositions[dict_key] = ns
 
 # %%
-for name, ns in recompositions.items():
-    print('working on ', ns.name)
-    print(ns.data.sum(axis=0).min())
-    print(ns.data.sum(axis=1).min())
-    print(ns.H.sum(axis=0).min())
-    print(ns.W.sum(axis=1).min())
+df = pd.concat([pd.Series(ns.data_loss_per_cell, name=name) for name, ns in recompositions.items()], axis=1)
+df = pd.melt(df, var_name='dataset', value_name='data loss per cell')
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+_utils.sns.violinplot(data=df, x="dataset", y="data loss per cell")
+
+plt.title('Data loss per cell')
+plt.setp(plt.gca().get_xticklabels(), rotation=45)
+plt.show()
+plt.close()
+
+_utils.sns.kdeplot(df, hue="dataset", x="data loss per cell", clip=(0, 1000))
+plt.show()
+
+# %%
+for name, ns in recompositions.items():
+    print('stats for', name)
+    print('minimum counts per gene', ns.data.sum(axis=0).min())
+    print('minimum counts per cell', ns.data.sum(axis=1).min())
+    print('minimum sum of gene across GEPs', ns.H.sum(axis=0).min())
+    print('minimum sum of cell usage', ns.W.sum(axis=1).min(), '\n')
+
+
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### 4. Use NMF to decompose the resampled datasets
 
 # %%
@@ -235,11 +256,12 @@ for name, ns in recompositions.items():
     
     tens = torch.tensor(ns.data).to(device)
     W, H, n_iter = cnmf.nmf_torch(ns.data, nmf_kwargs, tens, verbose=True)
+    del tens
     
     ns.nmf_error = sknmf._beta_divergence(ns.data, W, H, beta_loss) / subdata.n_obs
-    print(f'Error per sample = {ns.nmf_error: .1f}')
+    print(f'Error per sample = {ns.nmf_error: .1f}')   
 
-    del tens
+    ns.nmf_loss_per_cell = pfnmf.calc_beta_divergence(ns.data.T, H.T, np.zeros((H.shape[1], 0)), W.T, np.zeros((0, W.shape[0])), per_column=True)
 
     # Normalizing the GEPs so L2 norm == 1
     rownorm = np.linalg.norm(H, ord=2, axis=1, keepdims=True)
@@ -286,7 +308,35 @@ for name, ns in recompositions.items():
     ns.W_nmf_proportion = ns.W_nmf_proportion @ perm.T
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %%
+df = pd.concat([pd.Series(ns.nmf_loss_per_cell, name=name) for name, ns in recompositions.items()], axis=1)
+df = pd.melt(df, var_name='dataset', value_name='data loss per cell')
+
+_utils.sns.violinplot(data=df, x="dataset", y="data loss per cell")
+
+plt.title('Denovo NMF with true rank loss per cell')
+plt.setp(plt.gca().get_xticklabels(), rotation=45)
+plt.show()
+plt.close()
+
+_utils.sns.kdeplot(df, hue="dataset", x="data loss per cell", clip=(0, 1000))
+plt.show()
+
+# %%
+for name, ns in recompositions.items():
+    plt.scatter(ns.data_loss_per_cell, ns.nmf_loss_per_cell, label=name, s=2)
+
+plt.title('Comparing data and NMF loss per cell')
+
+plt.xlabel('data loss per cell')
+plt.xlim((0, 1000))
+
+plt.ylabel('NMF loss per cell')
+plt.ylim((0, 1000))
+plt.legend()
+plt.show()
+
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 5. Compare the usages to the original
 #
 
@@ -305,7 +355,7 @@ for name, ns in recompositions.items():
     plt.close()
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 6. Compare the genes to the original
 
 # %%
@@ -351,7 +401,7 @@ for name, ns in recompositions.items():
     plt.close()
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### 7. Perform decomposition of K12_m_p[#] using K12 GEPs (loss of GEP operator)
 
 # %%
@@ -368,15 +418,17 @@ for name, ns in recompositions.items():
                 'max_iter': max_iter,
                 'beta_loss': beta_loss
                }
-    tens = torch.tensor(ns.data).to(device)
     
+    tens = torch.tensor(ns.data).to(device)   
     W, H, n_iter = cnmf.nmf_torch(ns.data, nmf_kwargs, tens, verbose=True)
+    del tens
 
     ns.pfnmf_error = []
     ns.pfnmf_error.append(sknmf._beta_divergence(ns.data, W, H, beta_loss) / subdata.n_obs)
     print(f'Error per sample = {ns.pfnmf_error[-1]: .1f}')
 
-    del tens
+    ns.pfnmf0_loss_per_cell = pfnmf.calc_beta_divergence(ns.data.T, H.T, np.zeros((H.shape[1], 0)), W.T, np.zeros((0, W.shape[0])), per_column=True)
+
     
     ns.W_pfnmf = []
     ns.W_pfnmf.append(W)
@@ -384,7 +436,35 @@ for name, ns in recompositions.items():
     print()
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %%
+df = pd.concat([pd.Series(ns.pfnmf0_loss_per_cell, name=name) for name, ns in recompositions.items()], axis=1)
+df = pd.melt(df, var_name='dataset', value_name='data loss per cell')
+
+_utils.sns.violinplot(data=df, x="dataset", y="data loss per cell")
+
+plt.title('Decomposition using Full rank GEPs loss per cell')
+plt.setp(plt.gca().get_xticklabels(), rotation=45)
+plt.show()
+plt.close()
+
+_utils.sns.kdeplot(df, hue="dataset", x="data loss per cell", clip=(0, 1000))
+plt.show()
+
+# %%
+for name, ns in recompositions.items():
+    plt.scatter(ns.pfnmf0_loss_per_cell, ns.nmf_loss_per_cell, label=name, s=2)
+
+plt.title('Comparing de-novo and using full rank GEPs for NMF - loss per cell')
+
+plt.xlabel('loss per cell using full rank GEPs')
+plt.xlim((0, 1000))
+
+plt.ylabel('de-novo loss per cell')
+plt.ylim((0, 1000))
+plt.legend()
+plt.show()
+
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # #### usages comparisons
 # Results came out clear as expected
 
@@ -419,7 +499,7 @@ for name, ns in recompositions.items():
     plt.close(un_sns.figure)
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # #### Gene coefficients comparison
 # Surprisingly, a lot of information was retained for dropped GEPs both with beta coefficients and jaccard score
 
@@ -547,22 +627,52 @@ for name, ns in recompositions.items():
                 'max_iter': max_iter,
                 'beta_loss': beta_loss
                }
-    tens = torch.tensor(orig_ns.data).to(device)
     
+    tens = torch.tensor(orig_ns.data).to(device)
     W, H, n_iter = cnmf.nmf_torch(orig_ns.data, nmf_kwargs, tens, verbose=True)
+    del tens
 
     ns.gain_pfnmf_error = []
     ns.gain_pfnmf_error.append(sknmf._beta_divergence(orig_ns.data, W, H, beta_loss) / subdata.n_obs)
-    print(f'Error per sample = {ns.pfnmf_error[-1]: .1f}')
+    print(f'Error per sample = {ns.gain_pfnmf_error[-1]: .1f}')
 
-    del tens
+    ns.gain_pfnmf_loss_per_cell = pfnmf.calc_beta_divergence(orig_ns.data.T, H.T, np.zeros((H.shape[1], 0)), W.T, np.zeros((0, W.shape[0])), per_column=True)
     
     ns.W_gain_pfnmf = []
     ns.W_gain_pfnmf.append(W)
     
     print()
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %%
+
+df = pd.concat([pd.Series(ns.gain_pfnmf_loss_per_cell, name=name) for name, ns in recompositions.items()], axis=1)
+df = pd.melt(df, var_name='dataset', value_name='data loss per cell')
+
+_utils.sns.violinplot(data=df, x="dataset", y="data loss per cell")
+
+plt.title('Decomposition using Full rank GEPs loss per cell')
+plt.setp(plt.gca().get_xticklabels(), rotation=45)
+plt.show()
+plt.close()
+
+_utils.sns.kdeplot(df, hue="dataset", x="data loss per cell", clip=(0, 1000))
+plt.show()
+
+# %%
+for name, ns in recompositions.items():
+    plt.scatter(ns.pfnmf0_loss_per_cell, ns.gain_pfnmf_loss_per_cell, label=name, s=2)
+
+plt.title('Comparing NMF loss per cell on original')
+
+plt.xlabel('loss per cell using original data GEPs')
+plt.xlim((0, 1000))
+
+plt.ylabel('loss per cell using lower rank GEPs')
+plt.ylim((0, 1000))
+plt.legend()
+plt.show()
+
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # #### usages comparisons
 # Results: other GEPs seem to "take charge" of cells that were primarily using a dropped GEP
 
@@ -597,7 +707,7 @@ for name, ns in recompositions.items():
     plt.close(un_sns.figure)
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # #### Gene coefficients comparison
 # Results: some low correlation arrives from the GEP that is used to "cover" for the dropped one
 
@@ -732,7 +842,7 @@ for name, ns in recompositions.items():
 
 
 # %% [markdown] tags=[]
-# ### 10. Perform pfnmf with 1, 2, 3 extra GEPs of K12_0 using K12_m_p[#] GEPs (gain of GEP operator)
+# ### 10. Perform pfnmf on K12_0 using K12_m_p[#] GEPs with 1, 2, 3 extra GEPs (gain of GEP operator)
 # Results: after adding just one more GEP we get similar loss to the baseline
 
 # %%
@@ -741,7 +851,7 @@ for name, ns in recompositions.items():
 # pfnmf is written for constant W_1, so we will transpose as needed:
 # k12_0 ~ W_1 @ K12_m_p[#].H_nmf + W_2 @ H_2  <--> k12_0.T ~ K12_m_p[#].H_nmf.T @ W_1.T + H_2.T @ W_2.T
 
-pfnmf_repeats = 3
+pfnmf_repeats = 5
 
 X = orig_ns.data.T
 X[:, (X.sum(axis=0)==0)] += np.finfo(float).eps
@@ -775,5 +885,109 @@ for name, ns in recompositions.items():
                 print(f"repeat {repeat}, after {n_iter} iterations reached {final_loss: .4e}"
                      f", per sample loss = {ns.gain_pfnmf_error[added_rank]: .1f}")
     print()
+
+# %%
+added_rank = 1
+
+for name, ns in recompositions.items():
+    ns.pfnmf1_loss_per_cell = pfnmf.calc_beta_divergence(
+        X, ns.gain_pfnmf[added_rank]['w1'], ns.gain_pfnmf[added_rank]['w2'],
+        ns.gain_pfnmf[added_rank]['h1'], ns.gain_pfnmf[added_rank]['h2'], beta_loss, per_column=True)
+
+
+# %%
+
+df = pd.concat([pd.Series(ns.pfnmf1_loss_per_cell, name=name) for name, ns in recompositions.items()], axis=1)
+df = pd.melt(df, var_name='dataset', value_name='data loss per cell')
+
+_utils.sns.violinplot(data=df, x="dataset", y="data loss per cell")
+
+plt.title('Decomposition using pfnmf with 1 extra program loss per cell')
+plt.setp(plt.gca().get_xticklabels(), rotation=45)
+plt.show()
+plt.close()
+
+_utils.sns.kdeplot(df, hue="dataset", x="data loss per cell", clip=(0, 1000))
+plt.show()
+
+# %%
+for name, ns in recompositions.items():
+    plt.scatter(ns.pfnmf1_loss_per_cell, orig_ns.nmf_loss_per_cell, label=name, s=2)
+
+plt.title('Comparing pfNMF loss per cell to de-novo full rank')
+
+plt.xlabel('loss per cell using pfnmf with 1 extra program')
+plt.xlim((0, 1000))
+
+plt.ylabel('loss per cell using lower rank GEPs')
+plt.ylim((0, 1000))
+plt.legend()
+plt.show()
+
+# %% [markdown]
+# #### Gene coefficients
+
+
+# %%
+# Extracting gene coefficients from resampled data:
+
+obs_mask = orig_ns.data.sum(axis=1)!=0
+var_mask = orig_ns.data.std(axis=0)!=0
+
+data = orig_ns.data.copy()[obs_mask]
+data *= (500 / data.sum(axis=1, keepdims=True))
+np.log1p(data, out=data)
+data -= data.mean(axis=0, keepdims=True)
+
+data[:, var_mask] /= data[:, var_mask].std(axis=0, keepdims=True) 
+
+for name, ns in recompositions.items():  
+    # not perfectly sound, but OK for now
+    h1 = ns.gain_pfnmf[1]['h1'].T[obs_mask]
+    h2 = ns.gain_pfnmf[1]['h2'].T[obs_mask]
+    
+    eps_W = np.concatenate([h1, h2], axis=1) + np.finfo(float).eps**2
+    normalized_usages = (eps_W  / (eps_W.sum(axis=1, keepdims=True)))
+    normalized_usages[eps_W.sum(axis=1) < np.finfo(float).eps] = np.finfo(float).eps**2
+
+    coefs = pd.DataFrame(
+        _utils.fastols(normalized_usages, data).T,
+        index=subdata.var[subdata.var.highly_variable].index,
+        columns=[*ns.nmf_prog_names, ns.name+'.e1'])
+    
+    if len(ns.gene_coefs__pfnmf) == 1:
+        ns.gene_coefs__pfnmf.append(coefs)
+    else:
+        ns.gene_coefs__pfnmf[1] = coefs
+
+# %%
+# Need to examine this results
+
+# %%
+n_coefs = 400
+
+for name, ns in recompositions.items():
+    
+    concatenated_spectras = pd.concat([orig_ns.gene_coefs__pfnmf[0],
+                                       ns.gene_coefs__pfnmf[1]], axis=1)
+
+    n_genes, n_programs = concatenated_spectras.shape
+
+    ranked_coefs = n_genes - rankdata(concatenated_spectras, axis=0)
+    
+    ranked_coefs[ranked_coefs > n_coefs] = n_coefs
+    
+    spearman_corr = np.corrcoef(ranked_coefs, rowvar=False)
+    
+    ax = _utils.heatmap_with_numbers(
+        spearman_corr[:orig_ns.rank, orig_ns.rank:],
+        title=f'k12_0 decomposed with {name} GEPs + 1 extra, gene coefficients correlations', param_dict={'vmin': 0, 'vmax': 1})
+
+    ax.set_xticks(ticks=ax.get_xticks(), labels=ns.gene_coefs__pfnmf[1].columns)
+    ax.set_yticks(ticks=ax.get_yticks(), labels=orig_ns.nmf_prog_names)
+    ax.tick_params(axis='x', labelrotation = 45)
+
+    plt.show()
+    plt.close()
 
 # %%

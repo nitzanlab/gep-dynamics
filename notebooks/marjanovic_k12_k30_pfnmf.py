@@ -21,7 +21,7 @@
 # 1.  Loading the data
 # 2.  Finding jointly highly variable genes
 # 3.  Ruuning NNLS to get the K12 GEPs on the jHVGs
-# 4.  Decomposing the K30 dataset de-novo at the same rank as K12
+# 4.  Decomposing the K30 dataset de-novo at K12 rank with 0, 1, 2, 3 additional programs
 # 5.  Decomposing the K30 dataset using pfnmf with 0, 1, 2, 3 additional novel programs
 # 6.  Evaluating the usage patterns of the different decompositions
 # 7.  Evaluating the gene coefficients of the different GEPs from the different decompositions
@@ -39,11 +39,13 @@ import sys
 import os
 
 from urllib.request import urlretrieve
+from argparse import Namespace
 
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import matplotlib.pyplot as plt
+import seaborn as sns
 import networkx as nx
 
 from sklearn.decomposition import _nmf as sknmf
@@ -60,6 +62,7 @@ _utils.cd_proj_home()
 print(os.getcwd())
 
 # %%
+# %%time
 import torch
 assert torch.cuda.is_available()
 device = 'cuda'
@@ -85,7 +88,7 @@ k_30
 # %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ## Running pfNMF on K30 using the K12 GEPs
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Preparing K12 and K30 data on joint highly variable genes (jHVGs)
 #
 
@@ -117,15 +120,15 @@ X30 = sc.pp.scale(k_30[:, joint_K12_K30_HVG].X.toarray(), zero_center=False)
 print(f'X30.shape = {X30.shape}')
 X30[:4, :4]
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Running NNLS to get K12 GEPs (geps12) on jHVGs
 
 # %%
 #Parameters
 beta_loss = 'kullback-leibler'
-max_iter = 500
+max_iter = 800
 
-# %%
+# Usage proportions of the k_12 programs on k_12 data
 100 * k_12.obsm['usages_norm'].sum(axis=0) / k_12.n_obs
 
 # %%
@@ -141,39 +144,74 @@ nmf_kwargs={'H': k_12.obsm['usages'].T.copy(),
 tens = torch.tensor(X12.T).to(device)
 
 W, H, n_iter = cnmf.nmf_torch(X12.T, nmf_kwargs, tens, verbose=True)
-print(f'Error per sample = {(sknmf._beta_divergence(X12.T, W, H, beta_loss) / k_12.n_obs): .3e}')
+print(f'Error per sample = {(sknmf._beta_divergence(X12.T, W, H, beta_loss) / k_12.n_obs): .1f}')
 
 del tens
 
 geps12 = W.T
 geps12.shape
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
-# ### Decomposing K30 de-novo with same rank as geps12 (on jHVGs)
+# %%
+loss_per_cell = pfnmf.calc_beta_divergence(X12.T, W, np.zeros((2000, 0)), H, np.zeros((0, 455)), per_column=True)
+
+plt.hist(loss_per_cell, bins=20)
+plt.title('Distribution of loss per cell')
+plt.show()
 
 # %%
-pfnmf_results = {}
-rank_k12 = geps12.shape[0]
+np.percentile(loss_per_cell, 90)
 
-# %% magic_args="--no-raise-error false" language="script"
-#
-# nmf_kwargs={
-#     'n_components': rank_k12,
-#     'tol': _constants.NMF_TOLERANCE,
-#     'max_iter': max_iter,
-#     'beta_loss': beta_loss
-#    }
-#
-# tens = torch.tensor(X30).to(device)
-#
-# W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=True)
-#
-# final_loss = sknmf._beta_divergence(X30, W, H, beta_loss)
-# print(f'Error per sample = {(final_loss / k_30.n_obs): .3e}')
-#
-# pfnmf_results['de_novo'] = {'W': W, 'H': H, 'n_iter': n_iter, 'final_loss': final_loss}
-#
-# del tens
+# %%
+row_colors = pd.concat([pd.Series(k_12.obsm.get('row_colors'), name='cluster', index=k_12.obs.index),
+                       pd.Series(_utils.floats_to_colors(loss_per_cell, vmax=1000), name='residual', index=k_12.obs.index)], axis=1)
+
+un_sns = _utils.plot_usages_norm_clustermaps(k_12, normalized_usages=(H / np.sum(H, axis=0, keepdims=True)).T,
+    title='K12 decomposition on HVG', show=True, sns_clustermap_params={'row_colors': row_colors})
+
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# ### Decomposing the K30 dataset de-novo (on jHVGs) at K12 rank with 0, 1, 2, 3 additional programs
+
+# %%
+decompositions = {}   # {name: namespace}
+# pfnmf_results = {}
+# denovo_results = {}
+rank_k12 = geps12.shape[0]
+max_added_rank = 4
+
+# %%
+# # %%script --no-raise-error false
+
+tens = torch.tensor(X30).to(device)
+
+for added_rank in range(max_added_rank + 1):
+    rank = rank_k12 + added_rank
+    
+    nmf_kwargs={
+        'n_components': rank,
+        'tol': _constants.NMF_TOLERANCE,
+        'max_iter': max_iter,
+        'beta_loss': beta_loss
+       }
+
+    W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=False)
+
+    loss = sknmf._beta_divergence(X30, W, H, beta_loss) / k_30.n_obs
+    
+    sname = f'dn_{rank}'
+    ns = Namespace(
+        name=sname,
+        algorithm='regular',
+        W=W,
+        H=H,
+        rank=rank,
+        n_iter=n_iter,
+        loss=loss)
+    
+    decompositions[sname] = ns
+    
+    print(f'Error per sample for rank {ns.rank} ({ns.n_iter} iterations) = {ns.loss: .1f}')
+
+del tens
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Decomposing K30 with geps12 and no additional programs
@@ -191,14 +229,27 @@ rank_k12 = geps12.shape[0]
 #
 # tens = torch.tensor(X30).to(device)
 #
-# W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=True)
-#
-# final_loss = sknmf._beta_divergence(X30, W, H, beta_loss)
-# print(f'Error per sample = {(final_loss / k_30.n_obs): .3e}')
-#
-# pfnmf_results['k12'] = {'W': W, 'H': H, 'n_iter': n_iter, 'final_loss': final_loss}
+# W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=False)
 #
 # del tens
+#
+# loss = sknmf._beta_divergence(X30, W, H, beta_loss) / k_30.n_obs
+#
+#
+# sname = f'k12'
+# ns = Namespace(
+#     name=sname,
+#     algorithm='regular',
+#     W=W,
+#     H=H,
+#     rank=rank_k12,
+#     n_iter=n_iter,
+#     loss=loss)
+#
+# decompositions[sname] = ns
+#
+# print(f'Error per sample ({ns.n_iter} iterations) = {(ns.loss): .1f}')
+#
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Decomposing K30 with geps12 and additional programs
@@ -208,8 +259,11 @@ rank_k12 = geps12.shape[0]
 # # pfnmf is written for constant W_1, so we will transpose as needed:
 # # x30 ~ W_1 @ geps12 + W_2 @ H_2  <--> x30.T ~ geps12.T @ W_1.T + H_2.T @ W_2.T
 #
-# for added_rank in range(1, 5):
+# for added_rank in range(1, max_added_rank + 1):
 #     print(f"Working on added rank = {added_rank}")
+#     
+#     sname = f'k12e{added_rank}'
+#     rank = rank_k12 + added_rank
 #     
 #     best_loss = np.infty
 #     
@@ -221,23 +275,37 @@ rank_k12 = geps12.shape[0]
 #         
 #         if final_loss <= best_loss:
 #             best_loss = final_loss
-#             pfnmf_results[f'k12e{added_rank}'] = {'w1': w1, 'h1': h1, 'w2': w2, 'h2': h2, 'n_iter': n_iter, 'final_loss': final_loss}
+#             
+#             ns = Namespace(
+#                 name=sname,
+#                 algorithm='pfnmf'
+#                 w1=w1,
+#                 h1=h1,
+#                 w2=w2,
+#                 h2=h2,
+#                 rank=rank,
+#                 n_iter=n_iter,
+#                 loss=best_loss / k_30.n_obs)
 #
-#             print(f"repeat {repeat}, after {n_iter} iterations reached {final_loss: .4e}"
-#                  f", per sample loss = {(final_loss / k_30.n_obs): .3e}")
-
-# %% magic_args="--no-raise-error false" language="script"
+#             decompositions[sname] = ns
 #
-# np.savez_compressed(results_dir.joinpath('marjanovic_k12_k30_pfnmf.npz'), pfnmf_results=pfnmf_results)
+#             print(f"repeat {repeat}, after {ns.n_iter} iterations reached error per sample = {ns.loss: .1f}")
 
 # %%
-loaded = np.load(results_dir.joinpath('marjanovic_k12_k30_pfnmf.npz'), allow_pickle=True)
+# # %%script --no-raise-error false
+
+np.savez_compressed(notebook_dir.joinpath('decompositions.npz'), decompositions=decompositions)
+
+# %%
+loaded = np.load(notebook_dir.joinpath('decompositions.npz'), allow_pickle=True)
 print([key for key in loaded.keys()])
 
 # %%
-pfnmf_results = loaded['pfnmf_results'].item()
+decompositions = loaded['decompositions'].item()
+for name, ns in decompositions.items():
+    print(name, vars(ns).keys())
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ## Evaluating the added programs
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
@@ -245,150 +313,143 @@ pfnmf_results = loaded['pfnmf_results'].item()
 
 # %%
 columns_k12 = [f'k12.p{i}' for i in range(geps12.shape[0])]
-sname = k_30.uns["sname"]
 
-coloring_scheme = {'de_novo': '#d62728', 'k12': '#2ca02c', 'k12e1': 'limegreen', 'k12e2': 'yellow', 'k12e3': 'orange', 'k12e4': 'chocolate'}
+coloring_scheme = {'k12': '#2ca02c', 'k12e1': 'limegreen', 'k12e2': 'yellow',
+                   'k12e3': 'orange', 'k12e4': 'chocolate'}
+coloring_scheme.update({f'dn_{rank_k12 + added_rank}': '#d62728' for added_rank in range(max_added_rank + 1)})
 
-for key in pfnmf_results.keys():
-    print(f"{key}\t{pfnmf_results[key]['final_loss'] / 505: .0f}")
+for sname, ns in decompositions.items():
+    print(f"{key}\t{ns.loss: .0f}")
 
 
-# %%
-for dict_key, short_name in [('de_novo', 'k30'), ('k12', 'k12')]:
-    res_dict = pfnmf_results[dict_key]
-    
-    res_dict['rank'] = rank_k12
-    
-    res_dict['norm_usage'] = res_dict['W'] / \
-        np.linalg.norm(res_dict['W'], 1, axis=1, keepdims=True)
-    
-    res_dict['prog_percent'] = res_dict['norm_usage'].sum(axis=0) * 100 / k_30.n_obs
-
-    res_dict['prog_name'] = [f'{short_name}.p{i}' for i in range(rank_k12)]
-    
-    res_dict['prog_label_2l'] = [name + f'\n({res_dict["prog_percent"][i]: 0.1f}%)' for i, name in enumerate(res_dict['prog_name'])]
-    res_dict['prog_label_1l'] = [name + f' ({res_dict["prog_percent"][i]: 0.1f}%)' for i, name in enumerate(res_dict['prog_name'])]   
 
 # %%
-for index, dict_key in enumerate(['k12e1', 'k12e2', 'k12e3', 'k12e4']):
-    added_rank = index + 1
-    
-    res_dict = pfnmf_results[dict_key]
-    
-    res_dict['rank'] = rank_k12 + added_rank
-    
-    usages = np.concatenate([res_dict['h1'], res_dict['h2']], axis=0).T
-    
-    res_dict['norm_usage'] = usages / np.linalg.norm(usages, 1, axis=1, keepdims=True)
-    
-    res_dict['prog_percent'] = res_dict['norm_usage'].sum(axis=0) * 100 / k_30.n_obs
+# adding needed fields to the namespace objects
 
-    res_dict['prog_name'] = [f'k12e{added_rank}.p{i}' for i in range(rank_k12)]
-    res_dict['prog_name'].extend([f'k12e{added_rank}.e{i}' for i in range(added_rank)])
+for sname, ns in decompositions.items():
+    if ns.algorithm == 'pfnmf':
+        ns.loss_per_cell = pfnmf.calc_beta_divergence(X30.T, ns.w1, ns.w2, ns.h1, ns.h2, per_column=True)
+        usages = np.concatenate([ns.h1, ns.h2], axis=0).T
+    else:
+        ns.loss_per_cell = pfnmf.calc_beta_divergence(   # X30 ~ W @ H
+            X30.T, ns.H.T, np.zeros((ns.H.shape[1], 0)), ns.W.T, np.zeros((0, ns.W.shape[0])), per_column=True)
+        usages = ns.W
     
-    res_dict['prog_label_2l'] = [name + f'\n({res_dict["prog_percent"][i]: 0.1f}%)' for i, name in enumerate(res_dict['prog_name'])]
-    res_dict['prog_label_1l'] = [name + f' ({res_dict["prog_percent"][i]: 0.1f}%)' for i, name in enumerate(res_dict['prog_name'])]   
+    ns.norm_usages = usages / np.linalg.norm(usages, 1, axis=1, keepdims=True)
+    
+    ns.prog_percentages = ns.norm_usages.sum(axis=0) * 100 / k_30.n_obs
+    
+    if ns.algorithm == 'pfnmf':
+        ns.prog_names = [f'{sname}.p{i}' for i in range(rank_k12)]
+        ns.prog_names.extend([f'{sname}.e{i}' for i in range(ns.rank - rank_k12)])
+    else:
+        ns.prog_names = [f'{sname}.p{i}' for i in range(ns.rank)]
+
+    ns.prog_labels_1l = [name + f' ({ns.prog_percentages[i]: 0.1f}%)' for i, name in enumerate(ns.prog_names)]   
+    ns.prog_labels_2l = [name + f'\n({ns.prog_percentages[i]: 0.1f}%)' for i, name in enumerate(ns.prog_names)]
+    
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### usages clustermaps
 
 # %%
-dict_key = 'de_novo'
-res_dict = pfnmf_results[dict_key]
-
-title = f'K_30 normalized usages of de-novo GEPs, k={rank_k12}'
-
-un_sns = _utils.plot_usages_norm_clustermaps(k_30, normalized_usages=res_dict['norm_usage'],
-    columns=res_dict['prog_label_2l'], title=title, show=True, sns_clustermap_params={'col_colors': [coloring_scheme[dict_key]] * res_dict['rank']})
-
-# %%
-dict_key = 'k12'
-res_dict = pfnmf_results[dict_key]
-
-title = f'K_30 normalized usages of k_12 GEPs, k={rank_k12}'
-
-un_sns = _utils.plot_usages_norm_clustermaps(k_30, normalized_usages=res_dict['norm_usage'],
-    columns=res_dict['prog_label_2l'], title=title, show=True, sns_clustermap_params={'col_colors': [coloring_scheme[dict_key]] * res_dict['rank']})
-
-# %% [markdown]
-# Creating expanded usages DataFrame for added rank 1
-
-# %%
-for dict_key in ['k12e1', 'k12e2', 'k12e3', 'k12e4']:
-    res_dict = pfnmf_results[dict_key]
+for name, ns in decompositions.items():
+    if 'dn' in name:
+        title = f'K_30 normalized usages of de-novo GEPs, k={ns.rank}'
+    elif name == 'k12':
+        title = f'K_30 normalized usages of k_12 GEPs (rank={ns.rank})'
+    elif ns.algorithm == 'pfnmf':
+        title = f'K_30 normalized usages of k_12 GEPs + {ns.rank - rank_k12} novel'
     
-    title = f'K_30 normalized usages of k_12 GEPs + {res_dict["rank"] - rank_k12} novel'
+    row_colors = pd.concat([pd.Series(k_30.obsm.get('row_colors'), name='cluster', index=k_30.obs.index),
+                       pd.Series(_utils.floats_to_colors(ns.loss_per_cell, cmap='RdYlGn_r', vmax=1200), name='residual', index=k_30.obs.index)], axis=1)
     
-    un_sns = _utils.plot_usages_norm_clustermaps(k_30, normalized_usages=res_dict['norm_usage'],
-        columns=res_dict['prog_label_2l'], title=title, show=True, sns_clustermap_params={'col_colors': [coloring_scheme[dict_key]] * res_dict['rank']})
-
-
-# %%
-title = f'K_30 normalized usages of de-novo GEPs and k_12 GEPs'
-
-dict_key0 = 'k12'
-res_dict0 = pfnmf_results[dict_key0]
-
-dict_key1 = 'de_novo'
-res_dict1 = pfnmf_results[dict_key1]
-
-joint_usages = np.concatenate([res_dict0['norm_usage'], res_dict1['norm_usage']], axis=1)
-
-joint_labels = res_dict0['prog_label_2l'] + res_dict1['prog_label_2l']
-
-joint_colors = [coloring_scheme[dict_key0]] * res_dict0['rank'] + [coloring_scheme[dict_key1]] * res_dict1['rank']
-
-un_sns = _utils.plot_usages_norm_clustermaps(k_30, normalized_usages=joint_usages, columns=joint_labels,
-                                             title=title, show=True, sns_clustermap_params={'col_colors': joint_colors})
-
-# %%
-dict_key0 = 'de_novo'
-res_dict0 = pfnmf_results[dict_key0]
-
-for dict_key1 in ['k12e1', 'k12e2', 'k12e3', 'k12e4']:
-    res_dict1 = pfnmf_results[dict_key1]
+    un_sns = _utils.plot_usages_norm_clustermaps(k_30, normalized_usages=ns.norm_usages,
+        columns=ns.prog_labels_2l, title=title, show=True, sns_clustermap_params={
+            'col_colors': [coloring_scheme[name]] * ns.rank, 'row_colors': row_colors})
     
-    title = f'K_30 normalized usages of de-novo GEPs and k_12 GEPs + {res_dict1["rank"] - rank_k12} novel'
-
-    joint_usages = np.concatenate([res_dict0['norm_usage'], res_dict1['norm_usage']], axis=1)
-
-    joint_labels = res_dict0['prog_label_2l'] + res_dict1['prog_label_2l']
-
-    joint_colors = [coloring_scheme[dict_key0]] * res_dict0['rank'] + [coloring_scheme[dict_key1]] * res_dict1['rank']
-
-    un_sns = _utils.plot_usages_norm_clustermaps(k_30, normalized_usages=joint_usages, columns=joint_labels,
-                                                 title=title, show=True, sns_clustermap_params={'col_colors': joint_colors})
-
-
-# %% [markdown]
-# apply the usages clustermap function
+    plt.hist(ns.loss_per_cell, bins=20)
+    plt.show()
+    plt.close()
 
 # %%
+
+for dn_name, pf_name in zip(['dn_6', 'dn_7', 'dn_8', 'dn_9', 'dn_10'],
+                                ['k12', 'k12e1', 'k12e2', 'k12e3', 'k12e4']):
+    ns0 = decompositions[dn_name]
+    ns1 = decompositions[pf_name]
+    
+    title = f'K_30 normalized usages of de-novo GEPs and k_12 GEPs + {ns1.rank - rank_k12} novel'
+
+    joint_usages = np.concatenate([ns0.norm_usages, ns1.norm_usages], axis=1)
+
+    joint_labels = ns0.prog_labels_2l + ns1.prog_labels_2l
+
+    joint_colors = [coloring_scheme[dn_name]] * ns0.rank + [coloring_scheme[pf_name]] * ns1.rank
+
+    un_sns = _utils.plot_usages_norm_clustermaps(
+        k_30, normalized_usages=joint_usages, columns=joint_labels,
+        title=title, show=True, sns_clustermap_params={'col_colors': joint_colors})
+    
+    plt.plot([0, 2000], [0, 2000], 'r-')
+    plt.scatter(ns0.loss_per_cell, ns1.loss_per_cell, s=2)
+    plt.xlabel(f'{dn_name} loss per cell')
+    plt.ylabel(f'{pf_name} loss per cell')
+    plt.title('Comparison of loss per cell using two decompositions')
+    plt.show()
+    plt.close()
+
+
+# %%
+def aggregate_ns_fields(ns_dict, key_list):
+    ks = [ns_dict[key].rank for key in key_list]
+    
+    joint_prog_names = []
+    for key in key_list:
+        joint_prog_names.extend(ns_dict[key].prog_names.copy())
+    
+    joint_usages = ns_dict[key_list[0]].norm_usages.copy()
+    joint_labels = ns_dict[key_list[0]].prog_labels_1l.copy()
+    joint_colors = [coloring_scheme[key_list[0]]] * ns_dict[key_list[0]].rank
+    
+    for key in key_list[1:]:
+        joint_usages = np.concatenate([joint_usages, ns_dict[key].norm_usages.copy()], axis=1)
+
+        joint_labels.extend(ns_dict[key].prog_labels_1l.copy())
+
+        joint_colors.extend([coloring_scheme[key]] * ns_dict[key].rank)
+    
+    return ks, joint_prog_names, joint_usages, joint_labels, joint_colors
+
+
+
+# %%
+keys = ['k12', 'k12e1', 'k12e2', 'k12e3', 'dn_9']
+
+ks, joint_prog_names, joint_usages, joint_labels, joint_colors = aggregate_ns_fields(decompositions, keys)
+
+
 title = f'K_30 normalized usages of de-novo GEPs and k_12 GEPs {rank_k12} + [1, 2, 3] novel'
 
-dict_key0 = 'k12'
-res_dict0 = pfnmf_results[dict_key0]
+un_sns = _utils.plot_usages_norm_clustermaps(
+    k_30, normalized_usages=joint_usages, columns=joint_labels, title=title,
+    show=True, sns_clustermap_params={'col_colors': joint_colors, 'figsize': (13, 13)})
 
-joint_usages = res_dict0['norm_usage'].copy()
-joint_labels = res_dict0['prog_label_1l'].copy()
-joint_colors = [coloring_scheme[dict_key0]] * res_dict0['rank']
 
-for dict_key1 in ['k12e1', 'k12e2', 'k12e3', 'de_novo']:
-    res_dict1 = pfnmf_results[dict_key1]
-    
-    joint_usages = np.concatenate([joint_usages, res_dict1['norm_usage']], axis=1)
 
-    joint_labels.extend(res_dict1['prog_label_1l'])
-
-    joint_colors.extend([coloring_scheme[dict_key1]] * res_dict1['rank'])
-
-    
-un_sns = _utils.plot_usages_norm_clustermaps(k_30, normalized_usages=joint_usages, columns=joint_labels, title=title,
-                                             show=True, sns_clustermap_params={'col_colors': joint_colors, 'figsize': (13, 13)})
-
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# ### Usages correlations
 
 # %%
-n_programs = joint_usages.shape[1]
+keys = ['k12', 'k12e1', 'k12e2', 'k12e3', 'dn_9']
+
+ks, joint_prog_names, joint_usages, joint_labels, joint_colors = aggregate_ns_fields(decompositions, keys)
+
+n_genes, n_programs = joint_usages.shape
+
+# ranked_coefs = n_genes - rankdata(joint_usages, axis=0)
+# ranked_coefs[ranked_coefs > (k_30.n_obs//2)] = (k_30.n_obs//2)
+# spearman_corr = np.corrcoef(ranked_coefs, rowvar=False)
 
 pearson_corr = np.corrcoef(joint_usages.T)
 
@@ -399,85 +460,132 @@ un_sns = _utils.sns.clustermap(pd.DataFrame(pearson_corr, index=joint_labels, co
 un_sns.figure.suptitle('Correlation of GEP usages', fontsize=40, y=1.02)
 plt.show()
 
+
 # %%
-threshold = 0.2
-keys = ['k12', 'k12e1', 'k12e2', 'k12e3', 'de_novo']
-prog_names = []
-for key in keys:
-    prog_names.extend(pfnmf_results[key]['prog_name'].copy())
+# correlation graph functions
 
-
-# maping adata short name to layer number
-name_map = dict(zip(keys, range(len(keys))))
-name_map.update({'k30': name_map.pop('de_novo')})  # for the de_novo
-ks = [pfnmf_results[key]['rank'] for key in keys]
-
-# adjacency matrix creation and filtering
-adj_df = pd.DataFrame(np.round((pearson_corr), 2),
-                      index=prog_names,
-                      columns=prog_names)
-
-# order
-linkage = hierarchy.linkage(
-    adj_df, method='average', metric='euclidean')
-prog_order = hierarchy.leaves_list(
-    hierarchy.optimal_leaf_ordering(linkage, adj_df))
-
-np.fill_diagonal(adj_df.values, 0)
-# adj_df.values[adj_df.values <= 0.0] = 0
-
-# keeping only edges between consecutive layers
-for i in range(len(ks) - 2):
-    adj_df.values[:np.sum(ks[:i + 1]), np.sum(ks[:i + 2]):] = 0
-    adj_df.values[np.sum(ks[:i + 2]):, :np.sum(ks[:i + 1])] = 0
-
-adj_df.values[adj_df.values <= threshold] = 0
-print(f'Number of edges={np.count_nonzero(adj_df)}')
-
-# ordering the nodes for display
-adj_df = adj_df.iloc[prog_order, prog_order]
-
-# create the graph object
-G = nx.from_numpy_array(adj_df.values, create_using=nx.Graph)
-nx.relabel_nodes(G, lambda i: adj_df.index[i], copy=False)
-nx.set_node_attributes(
-    G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
-
-# prepare graph for display
-layout = nx.multipartite_layout(G, subset_key='layer')
-
-edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
-edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
-
-
-for layer in {data['layer'] for key, data in G.nodes.data()}:
-    nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
-
-    angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+def get_ordered_adjacency_matrix(correlation_matrix, prog_names, ranks, threshold=0.2):
+    # adjacency matrix creation
+    adj_df = pd.DataFrame(np.round((correlation_matrix), 2),
+                          index=prog_names,
+                          columns=prog_names)
     
-    for i, node in enumerate(nodes):
-        layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
+    # order
+    linkage = hierarchy.linkage(
+        adj_df, method='average', metric='euclidean')
+    prog_order = hierarchy.leaves_list(
+        hierarchy.optimal_leaf_ordering(linkage, adj_df))
+    
+    # keeping only edges between consecutive layers
+    for i in range(len(ranks) - 2):
+        adj_df.values[:np.sum(ranks[:i + 1]), np.sum(ranks[:i + 2]):] = 0
+        adj_df.values[np.sum(ranks[:i + 2]):, :np.sum(ranks[:i + 1])] = 0
 
-fig, ax = plt.subplots(1, 1, figsize=(16.4, 19.2), dpi=100)
-nx.draw(G, layout, node_size=3000, with_labels=False, edge_color=weights,
-        edge_vmin=threshold, edge_vmax=1., width=edge_width, ax=ax)
+    np.fill_diagonal(adj_df.values, 0)
+    adj_df.values[adj_df.values <= threshold] = 0
+    
+    print(f'Number of edges={np.count_nonzero(adj_df)}')
 
-cmp = plt.matplotlib.cm.ScalarMappable(plt.matplotlib.colors.Normalize(vmin=threshold, vmax=1))
-plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(15, 5, 71))
+    # ordering the nodes for display
+    adj_df = adj_df.iloc[prog_order, prog_order]
+    
+    return adj_df
 
-# change color of layers
-for key in keys:
-    nx.draw_networkx_nodes(
-        G, layout, node_color=coloring_scheme[key], node_size=2800,
-        nodelist=pfnmf_results[key]['prog_name'], ax=ax)
-nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
+def plot_layered_correlation_graph(layer_keys, adj_df, prog_names_dict, title,
+                                   plt_figure_kwargs=None, fig_title_kwargs=None):
+    
+    # setting figure arguments
+    figure_kwargs = {'figsize': (14.4, 16.2), 'dpi': 100}
+    if plt_figure_kwargs is not None: figure_kwargs.update(plt_figure_kwargs)
+    
+    title_kwargs = {'fontsize': 25, 'y': 0.95}
+    if fig_title_kwargs is not None: title_kwargs.update(fig_title_kwargs)
 
-ax.set_title(f'Timepoint usages Pearson correlation graph, correlation threshold={threshold}',
-             {'fontsize': 25})
+    
+    # maping adata short name to layer number
+    name_map = dict(zip(layer_keys, range(len(layer_keys))))
 
+    # create the graph object
+    G = nx.from_numpy_array(adj_df.values, create_using=nx.Graph)
+    nx.relabel_nodes(G, lambda i: adj_df.index[i], copy=False)
+    nx.set_node_attributes(
+        G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
+
+    # prepare graph for display
+    layout = nx.multipartite_layout(G, subset_key='layer')
+
+    edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
+    edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
+
+    if len(layer_keys) > 2:
+        for layer in {data['layer'] for key, data in G.nodes.data()}:
+            nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
+
+            angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+
+            for i, node in enumerate(nodes):
+                layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
+
+    fig, ax = plt.subplots(1, 1, **figure_kwargs)
+    nx.draw(G, layout, node_size=3000, with_labels=False, edge_color=weights,
+            edge_vmin=threshold, edge_vmax=1., width=edge_width, ax=ax)
+
+    cmp = plt.matplotlib.cm.ScalarMappable(plt.matplotlib.colors.Normalize(vmin=threshold, vmax=1))
+    plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(18, 5, 86))
+
+    # change color of layers
+    for key in layer_keys:
+        nx.draw_networkx_nodes(
+            G, layout, node_color=coloring_scheme[key], node_size=2800,
+            nodelist=prog_names_dict[key], ax=ax)
+    nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
+    
+    plt.suptitle(title, **title_kwargs)
+
+    plt.tight_layout()
+    return fig
+
+# %%
+keys = ['k12', 'k12e1', 'k12e2', 'k12e3', 'dn_9']
+threshold = 0.3
+
+title = f'GEP usages Pearson correlation graph, correlation threshold={threshold}'
+
+# aggregating data from the listed layers:
+ks, joint_prog_names, joint_usages, joint_labels, joint_colors = aggregate_ns_fields(decompositions, keys)
+
+prog_names_dict = {key: decompositions[key].prog_names for key in keys}
+
+# Creating the relevant adjacency matrix, here based on pearson correlation
+adj_df = get_ordered_adjacency_matrix(np.corrcoef(joint_usages.T), joint_prog_names, ks, threshold)
+
+fig = plot_layered_correlation_graph(keys, adj_df, prog_names_dict, title)
 plt.show()
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %%
+# keys = ['k12', 'dn_6', 'k12e1', 'dn_7', 'k12e2', 'dn_8', 'k12e3', 'dn_9']
+
+threshold = 0.3
+title = f'GEP usages Pearson correlation graph, correlation threshold={threshold}'
+
+for dn_name, pf_name in zip(['dn_6', 'dn_7', 'dn_8', 'dn_9', 'dn_10'],
+                                ['k12', 'k12e1', 'k12e2', 'k12e3', 'k12e4']):
+    keys = [dn_name, pf_name]
+    # aggregating data from the listed layers:
+    ks, joint_prog_names, joint_usages, joint_labels, joint_colors = aggregate_ns_fields(decompositions, keys)
+
+    prog_names_dict = {key: decompositions[key].prog_names for key in keys}
+
+    # Creating the relevant adjacency matrix, here based on pearson correlation
+    adj_df = get_ordered_adjacency_matrix(np.corrcoef(joint_usages.T), joint_prog_names, ks, threshold)
+
+    fig = plot_layered_correlation_graph(keys, adj_df, prog_names_dict, title, {'figsize': (6, 12), 'dpi': 80}, {'fontsize': 15})
+    plt.show(fig)
+    plt.close(fig)
+    
+
+
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Extracting usage coefficients over all genes
 
 # %%
@@ -488,17 +596,15 @@ sc.pp.log1p(k_30, layer=z_layer)
 sc.pp.scale(k_30, layer=z_layer)
 
 # %%
-for dict_key in pfnmf_results.keys():
-    res_dict = pfnmf_results[dict_key]
-    
-    res_dict['gene_coefs'] = pd.DataFrame(
-        _utils.fastols(res_dict['norm_usage'], k_30.layers[z_layer]).T,
+for name, ns in decompositions.items():    
+    ns.gene_coefs = pd.DataFrame(
+        _utils.fastols(ns.norm_usages, k_30.layers[z_layer]).T,
         index=k_30.var.index,
-        columns=res_dict['prog_name'])
+        columns=ns.prog_names)
 
 
 # %%
-res_dict['gene_coefs']
+ns.gene_coefs
 
 # %% [markdown] tags=[]
 # ### Running GO
@@ -513,20 +619,18 @@ genes_list = adata.var.loc[k_30.var.index, 'geneSymbol'].to_list()
 #
 # program_go_dir = _utils.set_dir(notebook_dir.joinpath('programs_GSEA'))
 #
-# for dict_key in pfnmf_results.keys():
-#     res_dict = pfnmf_results[dict_key]
-#     
-#     for index in range(res_dict['rank']):
-#         ordered_genes_index = res_dict['gene_coefs'].nlargest(
-#             columns=[res_dict['prog_name'][index]],
-#             n=1000).index
+# for name, ns in decompositions.items():    
+#     for index in range(ns.rank):
+#         ordered_genes_index = ns.gene_coefs.nlargest(
+#             columns=[ns.prog_names[index]], n=1000).index
+#         
 #         ordered_genes = adata.var.loc[ordered_genes_index, 'geneSymbol'].to_list()
 #         
 #         go_enrichment = gp.profile( 
 #             ordered_genes, ordered=True, background=genes_list)
 #
 #         go_enrichment.to_csv(
-#             program_go_dir.joinpath(f"{res_dict['prog_name'][index]}.csv"))
+#             program_go_dir.joinpath(f"{ns.prog_names[index]}.csv"))
 #
 
 
@@ -535,14 +639,11 @@ joint_HVG_geneID = set(joint_K12_K30_var[joint_K12_K30_var.highly_variable].inde
 k_30_HVG_geneID = set(k_30.var[k_30.var.highly_variable].index)
 union_HVG_geneID = k_30_HVG_geneID.union(joint_HVG_geneID)
 
-for dict_key in pfnmf_results.keys():
-    res_dict = pfnmf_results[dict_key]
-    for index in range(res_dict['rank']):
-        
-        
-        ordered_geneID = set(res_dict['gene_coefs'].nlargest(
-            columns=[res_dict['prog_name'][index]], n=1000).index)
-        print(res_dict['prog_name'][index],
+for name, ns in decompositions.items():    
+    for index in range(ns.rank):
+        ordered_geneID = set(ns.gene_coefs.nlargest(
+            columns=[ns.prog_names[index]], n=1000).index)
+        print(ns.prog_names[index],
               len(set.intersection(ordered_geneID, joint_HVG_geneID)),
               len(set.intersection(ordered_geneID, k_30_HVG_geneID)),
               len(set.intersection(ordered_geneID, union_HVG_geneID))
@@ -553,13 +654,10 @@ for dict_key in pfnmf_results.keys():
 #
 # program_go_dir = _utils.set_dir(notebook_dir.joinpath('programs_GSEA_HVG'))
 #
-# for dict_key in pfnmf_results.keys():
-#     res_dict = pfnmf_results[dict_key]
-#     
-#     for index in range(res_dict['rank']):
-#         ordered_genes_index = res_dict['gene_coefs'].nlargest(
-#             columns=[res_dict['prog_name'][index]],
-#             n=1000).index
+# for name, ns in decompositions.items():    
+#     for index in range(ns.rank):
+#         ordered_genes_index = ns.gene_coefs.nlargest(
+#             columns=[ns.prog_names[index]], n=1000).index
 #         
 #         ordered_genes_index = ordered_genes_index[ordered_genes_index.isin(joint_HVG_geneID)]
 #         
@@ -569,7 +667,7 @@ for dict_key in pfnmf_results.keys():
 #             ordered_genes, ordered=True, background=genes_list)
 #
 #         go_enrichment.to_csv(
-#             program_go_dir.joinpath(f"{res_dict['prog_name'][index]}.csv"))
+#             program_go_dir.joinpath(f"{ns.prog_names[index]}.csv"))
 #         
 # #         break
 # #     break
@@ -577,21 +675,17 @@ for dict_key in pfnmf_results.keys():
 
 # %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Calculating truncated spearman correlation
-#
 
 # %%
-keys = ['k12', 'k12e1', 'k12e2', 'k12e3', 'de_novo']
+keys = ['dn_6', 'dn_8', 'dn_10', 'k12', 'k12e2', 'k12e4']
 
 concatenated_spectras = pd.concat([
-    pfnmf_results[dict_key]['gene_coefs'].copy() for dict_key in keys], axis=1)
+    decompositions[key].gene_coefs.copy() for key in keys], axis=1)
 
 n_genes, n_programs = concatenated_spectras.shape
 
-
 ranked_coefs = n_genes - rankdata(concatenated_spectras, axis=0)
-
 ranked_coefs[ranked_coefs > _constants.N_COMPARED_RANKED] = _constants.N_COMPARED_RANKED
-
 spearman_corr = np.corrcoef(ranked_coefs, rowvar=False)
 
 # spearman figure
@@ -615,8 +709,6 @@ plt.show(fig)
 
 # plt.close(fig)
 
-
-# %%
 # correlation histogram
 fig, ax = plt.subplots(figsize=(6, 5))
 
@@ -630,76 +722,76 @@ plt.show()
 
 # plt.close(fig)
 
+
+
 # %%
-threshold = 0.17
+keys_lists = [['dn_6', 'dn_7', 'dn_8', 'dn_9', 'dn_10'],
+              ['k12', 'k12e1', 'k12e2', 'k12e3', 'k12e4'],
+              ['k12', 'k12e1', 'k12e2', 'k12e3', 'dn_9', 'dn_8', 'dn_7', 'dn_6']]
 
-# maping adata short name to layer number
-name_map = dict(zip(keys, range(len(keys))))
-name_map.update({'k30': name_map.pop('de_novo')})  # for the de_novo
-ks = [pfnmf_results[key]['rank'] for key in keys]
+threshold = 0.2
 
-# adjacency matrix creation and filtering
-adj_df = pd.DataFrame(np.round((spearman_corr), 2),
-                      index=concatenated_spectras.columns,
-                      columns=concatenated_spectras.columns)
+title = f'GEP gene-coefficients correlation graph, threshold={threshold}'
 
-# order
-linkage = hierarchy.linkage(
-    adj_df, method='average', metric='euclidean')
-prog_order = hierarchy.leaves_list(
-    hierarchy.optimal_leaf_ordering(linkage, adj_df))
+for keys in keys_lists:
+    # aggregating data from the listed layers:
+    ks, joint_prog_names, joint_usages, joint_labels, joint_colors = aggregate_ns_fields(decompositions, keys)
 
-np.fill_diagonal(adj_df.values, 0)
-# adj_df.values[adj_df.values <= 0.0] = 0
-
-# keeping only edges between consecutive layers
-for i in range(len(ks) - 2):
-    adj_df.values[:np.sum(ks[:i + 1]), np.sum(ks[:i + 2]):] = 0
-    adj_df.values[np.sum(ks[:i + 2]):, :np.sum(ks[:i + 1])] = 0
-
-adj_df.values[adj_df.values <= threshold] = 0
-print(f'Number of edges={np.count_nonzero(adj_df)}')
-
-# ordering the nodes for display
-adj_df = adj_df.iloc[prog_order, prog_order]
-
-# create the graph object
-G = nx.from_numpy_array(adj_df.values, create_using=nx.Graph)
-nx.relabel_nodes(G, lambda i: adj_df.index[i], copy=False)
-nx.set_node_attributes(
-    G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
-
-# prepare graph for display
-layout = nx.multipartite_layout(G, subset_key='layer')
-
-edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
-edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
+    prog_names_dict = {key: decompositions[key].prog_names for key in keys}
 
 
-for layer in {data['layer'] for key, data in G.nodes.data()}:
-    nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
+    # Creating the relevant adjacency matrix, here based on turncated Spearman correlation
+    concatenated_spectras = pd.concat([
+        decompositions[key].gene_coefs.copy() for key in keys], axis=1)
 
-    angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+    n_genes, n_programs = concatenated_spectras.shape
+
+    ranked_coefs = n_genes - rankdata(concatenated_spectras, axis=0)
+    ranked_coefs[ranked_coefs > _constants.N_COMPARED_RANKED] = _constants.N_COMPARED_RANKED
+    spearman_corr = np.corrcoef(ranked_coefs, rowvar=False)
+
+    adj_df = get_ordered_adjacency_matrix(spearman_corr, joint_prog_names, ks, threshold)
+
+    fig = plot_layered_correlation_graph(keys, adj_df, prog_names_dict, title)
+    plt.show()
+
+# %%
+threshold = 0.2
+title = f'GEP gene-coefficients correlation graph, threshold={threshold}'
+
+for dn_name, pf_name in zip(['k12', 'k12e1', 'k12e2', 'k12e3', 'k12e4'],
+                           ['dn_6', 'dn_7', 'dn_8', 'dn_9', 'dn_10']):
+    keys = [dn_name, pf_name]
+    # aggregating data from the listed layers:
+    ks, joint_prog_names, joint_usages, joint_labels, joint_colors = aggregate_ns_fields(decompositions, keys)
+
+    prog_names_dict = {key: decompositions[key].prog_names for key in keys}
+
+    # Creating the relevant adjacency matrix, here based on turncated Spearman correlation
+    concatenated_spectras = pd.concat([
+        decompositions[key].gene_coefs.copy() for key in keys], axis=1)
+
+    n_genes, n_programs = concatenated_spectras.shape
+
+    ranked_coefs = n_genes - rankdata(concatenated_spectras, axis=0)
+    ranked_coefs[ranked_coefs > _constants.N_COMPARED_RANKED] = _constants.N_COMPARED_RANKED
+    spearman_corr = np.corrcoef(ranked_coefs, rowvar=False)
+
+    adj_df = get_ordered_adjacency_matrix(spearman_corr, joint_prog_names, ks, threshold)
+
+    fig = plot_layered_correlation_graph(keys, adj_df, prog_names_dict, title, {'figsize': (6, 12), 'dpi': 80}, {'fontsize': 15})
+    plt.show(fig)
+    plt.close(fig)
     
-    for i, node in enumerate(nodes):
-        layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
 
-fig, ax = plt.subplots(1, 1, figsize=(16.4, 19.2), dpi=180)
-nx.draw(G, layout, node_size=3000, with_labels=False, edge_color=weights,
-        edge_vmin=threshold, edge_vmax=1., width=edge_width, ax=ax)
-
-cmp = plt.matplotlib.cm.ScalarMappable(plt.matplotlib.colors.Normalize(vmin=threshold, vmax=1))
-plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(15, 5, 71))
-
-# change color of layers
-for key in keys:
-    nx.draw_networkx_nodes(
-        G, layout, node_color=coloring_scheme[key], node_size=2800,
-        nodelist=pfnmf_results[key]['prog_name'], ax=ax)
-nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
-
-ax.set_title(f'Timepoint correlation graph, correlation threshold={threshold}',
-             {'fontsize': 25})
-plt.show()
 
 # %%
+W = np.concatenate([ns.w1, ns.w2], axis=1)
+W.shape
+
+# %%
+res = pfnmf.calc_beta_divergence(X30.T, ns.w1, np.zeros((2000, 0)), ns.h1, np.zeros((0, 505)), per_column=True)
+res.shape
+
+# %%
+np.zeros((2000, 0))
