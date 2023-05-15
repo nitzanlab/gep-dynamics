@@ -88,7 +88,7 @@ k_30
 # %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ## Running pfNMF on K30 using the K12 GEPs
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Preparing K12 and K30 data on joint highly variable genes (jHVGs)
 #
 
@@ -120,7 +120,7 @@ X30 = sc.pp.scale(k_30[:, joint_K12_K30_HVG].X.toarray(), zero_center=False)
 print(f'X30.shape = {X30.shape}')
 X30[:4, :4]
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Running NNLS to get K12 GEPs (geps12) on jHVGs
 
 # %%
@@ -163,7 +163,7 @@ np.percentile(loss_per_cell, 90)
 
 # %%
 row_colors = pd.concat([pd.Series(k_12.obsm.get('row_colors'), name='cluster', index=k_12.obs.index),
-                       pd.Series(_utils.floats_to_colors(loss_per_cell, vmax=1000), name='residual', index=k_12.obs.index)], axis=1)
+                       pd.Series(_utils.floats_to_colors(loss_per_cell, cmap='RdYlGn_r', vmax=1000), name='residual', index=k_12.obs.index)], axis=1)
 
 un_sns = _utils.plot_usages_norm_clustermaps(k_12, normalized_usages=(H / np.sum(H, axis=0, keepdims=True)).T,
     title='K12 decomposition on HVG', show=True, sns_clustermap_params={'row_colors': row_colors})
@@ -178,42 +178,41 @@ decompositions = {}   # {name: namespace}
 rank_k12 = geps12.shape[0]
 max_added_rank = 4
 
-# %%
-# # %%script --no-raise-error false
+# %% magic_args="--no-raise-error false" language="script"
+#
+# tens = torch.tensor(X30).to(device)
+#
+# for added_rank in range(max_added_rank + 1):
+#     rank = rank_k12 + added_rank
+#     
+#     nmf_kwargs={
+#         'n_components': rank,
+#         'tol': _constants.NMF_TOLERANCE,
+#         'max_iter': max_iter,
+#         'beta_loss': beta_loss
+#        }
+#
+#     W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=False)
+#
+#     loss = sknmf._beta_divergence(X30, W, H, beta_loss) / k_30.n_obs
+#     
+#     sname = f'dn_{rank}'
+#     ns = Namespace(
+#         name=sname,
+#         algorithm='regular',
+#         W=W,
+#         H=H,
+#         rank=rank,
+#         n_iter=n_iter,
+#         loss=loss)
+#     
+#     decompositions[sname] = ns
+#     
+#     print(f'Error per sample for rank {ns.rank} ({ns.n_iter} iterations) = {ns.loss: .1f}')
+#
+# del tens
 
-tens = torch.tensor(X30).to(device)
-
-for added_rank in range(max_added_rank + 1):
-    rank = rank_k12 + added_rank
-    
-    nmf_kwargs={
-        'n_components': rank,
-        'tol': _constants.NMF_TOLERANCE,
-        'max_iter': max_iter,
-        'beta_loss': beta_loss
-       }
-
-    W, H, n_iter = cnmf.nmf_torch(X30, nmf_kwargs, tens, verbose=False)
-
-    loss = sknmf._beta_divergence(X30, W, H, beta_loss) / k_30.n_obs
-    
-    sname = f'dn_{rank}'
-    ns = Namespace(
-        name=sname,
-        algorithm='regular',
-        W=W,
-        H=H,
-        rank=rank,
-        n_iter=n_iter,
-        loss=loss)
-    
-    decompositions[sname] = ns
-    
-    print(f'Error per sample for rank {ns.rank} ({ns.n_iter} iterations) = {ns.loss: .1f}')
-
-del tens
-
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Decomposing K30 with geps12 and no additional programs
 
 # %% magic_args="--no-raise-error false" language="script"
@@ -251,7 +250,7 @@ del tens
 # print(f'Error per sample ({ns.n_iter} iterations) = {(ns.loss): .1f}')
 #
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### Decomposing K30 with geps12 and additional programs
 
 # %% magic_args="--no-raise-error false" language="script"
@@ -278,7 +277,7 @@ del tens
 #             
 #             ns = Namespace(
 #                 name=sname,
-#                 algorithm='pfnmf'
+#                 algorithm='pfnmf',
 #                 w1=w1,
 #                 h1=h1,
 #                 w2=w2,
@@ -291,10 +290,9 @@ del tens
 #
 #             print(f"repeat {repeat}, after {ns.n_iter} iterations reached error per sample = {ns.loss: .1f}")
 
-# %%
-# # %%script --no-raise-error false
-
-np.savez_compressed(notebook_dir.joinpath('decompositions.npz'), decompositions=decompositions)
+# %% magic_args="--no-raise-error false" language="script"
+#
+# np.savez_compressed(notebook_dir.joinpath('decompositions.npz'), decompositions=decompositions)
 
 # %%
 loaded = np.load(notebook_dir.joinpath('decompositions.npz'), allow_pickle=True)
@@ -319,7 +317,7 @@ coloring_scheme = {'k12': '#2ca02c', 'k12e1': 'limegreen', 'k12e2': 'yellow',
 coloring_scheme.update({f'dn_{rank_k12 + added_rank}': '#d62728' for added_rank in range(max_added_rank + 1)})
 
 for sname, ns in decompositions.items():
-    print(f"{key}\t{ns.loss: .0f}")
+    print(f"{sname}\t{ns.loss: .0f}")
 
 
 
@@ -347,7 +345,7 @@ for sname, ns in decompositions.items():
 
     ns.prog_labels_1l = [name + f' ({ns.prog_percentages[i]: 0.1f}%)' for i, name in enumerate(ns.prog_names)]   
     ns.prog_labels_2l = [name + f'\n({ns.prog_percentages[i]: 0.1f}%)' for i, name in enumerate(ns.prog_names)]
-    
+
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### usages clustermaps
@@ -371,6 +369,9 @@ for name, ns in decompositions.items():
     plt.hist(ns.loss_per_cell, bins=20)
     plt.show()
     plt.close()
+
+# %%
+decompositions.keys()
 
 # %%
 
@@ -437,7 +438,7 @@ un_sns = _utils.plot_usages_norm_clustermaps(
 
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[]
 # ### Usages correlations
 
 # %%
@@ -617,6 +618,24 @@ genes_list = adata.var.loc[k_30.var.index, 'geneSymbol'].to_list()
 
 # %% magic_args="--no-raise-error false" language="script"
 #
+# # GSEA on the gene coefficients over K_12 data
+#
+# program_go_dir = _utils.set_dir(notebook_dir.joinpath('programs_GSEA'))
+#
+# for index in range(k_12.varm['usage_coefs'].shape[1]):
+#     ordered_genes_index = k_12.varm['usage_coefs'].nlargest(
+#         columns=[k_12.varm['usage_coefs'].columns[index]], n=1000).index
+#
+#     ordered_genes = k_12.var.loc[ordered_genes_index, 'geneSymbol'].to_list()
+#
+#     go_enrichment = gp.profile( 
+#         ordered_genes, ordered=True, background=adata.var.loc[k_12.var.index, 'geneSymbol'].to_list())
+#
+#     go_enrichment.to_csv(
+#         program_go_dir.joinpath(f"{k_12.varm['usage_coefs'].columns[index]}.csv"))
+
+# %% magic_args="--no-raise-error false" language="script"
+#
 # program_go_dir = _utils.set_dir(notebook_dir.joinpath('programs_GSEA'))
 #
 # for name, ns in decompositions.items():    
@@ -632,7 +651,7 @@ genes_list = adata.var.loc[k_30.var.index, 'geneSymbol'].to_list()
 #         go_enrichment.to_csv(
 #             program_go_dir.joinpath(f"{ns.prog_names[index]}.csv"))
 #
-
+#
 
 # %%
 joint_HVG_geneID = set(joint_K12_K30_var[joint_K12_K30_var.highly_variable].index)
@@ -727,6 +746,7 @@ plt.show()
 # %%
 keys_lists = [['dn_6', 'dn_7', 'dn_8', 'dn_9', 'dn_10'],
               ['k12', 'k12e1', 'k12e2', 'k12e3', 'k12e4'],
+              ['k12', 'k12e1', 'k12e2', 'k12e3', 'dn_9', 'dn_8', 'dn_7', 'dn_6'],
               ['k12', 'k12e1', 'k12e2', 'k12e3', 'dn_9', 'dn_8', 'dn_7', 'dn_6']]
 
 threshold = 0.2
@@ -795,3 +815,5 @@ res.shape
 
 # %%
 np.zeros((2000, 0))
+
+# %%

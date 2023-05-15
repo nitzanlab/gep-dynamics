@@ -28,7 +28,7 @@
 # 10. Perform pfnmf with 1, 2, 3 extra GEPs of K12_0 using K12_m_p[#] GEPs (gain of GEP operator)
 #
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### Imports and Data Loading
 
 # %%
@@ -130,7 +130,7 @@ usages[usages < np.finfo(usages.dtype).eps**2] = 0
 geps.shape
 
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # ### 2. Recompose the data and sample counts from Poisson with $WH$ rates
 
 # %%
@@ -161,7 +161,7 @@ print(f'non-zero entries of resampled data is {np.count_nonzero(ns.data) * 100 /
 # print the keys gained per experiment this far
 vars(ns).keys()
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 3. Recomposing the data without one GEP and sampling counts from Poisson
 
 # %%
@@ -336,7 +336,7 @@ plt.ylim((0, 1000))
 plt.legend()
 plt.show()
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # ### 5. Compare the usages to the original
 #
 
@@ -464,7 +464,7 @@ plt.ylim((0, 1000))
 plt.legend()
 plt.show()
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true jp-MarkdownHeadingCollapsed=true tags=[]
 # #### usages comparisons
 # Results came out clear as expected
 
@@ -650,7 +650,7 @@ df = pd.melt(df, var_name='dataset', value_name='data loss per cell')
 
 _utils.sns.violinplot(data=df, x="dataset", y="data loss per cell")
 
-plt.title('Decomposition using Full rank GEPs loss per cell')
+plt.title('Decomposition of full data using lower rank GEPs - loss per cell')
 plt.setp(plt.gca().get_xticklabels(), rotation=45)
 plt.show()
 plt.close()
@@ -959,9 +959,6 @@ for name, ns in recompositions.items():
         ns.gene_coefs__pfnmf.append(coefs)
     else:
         ns.gene_coefs__pfnmf[1] = coefs
-
-# %%
-# Need to examine this results
 
 # %%
 n_coefs = 400
