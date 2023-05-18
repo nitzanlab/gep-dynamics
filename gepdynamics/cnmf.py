@@ -179,7 +179,7 @@ def torch_to_np(tensor):
     return tensor.detach().cpu().numpy() 
 
 
-def nmf_torch(X, nmf_kwargs, tens, verbose=False):
+def nmf_torch(X, nmf_kwargs, tens=None, verbose: bool=False, device=None):
     """
     Wrapper for torchnmf (gpu), assimilating the keywords to sklearn nmf
     
@@ -193,7 +193,14 @@ def nmf_torch(X, nmf_kwargs, tens, verbose=False):
         must include 'n_components' >= 2
     
     tens : torch.Tensor
-        Normalized counts to be factorized, already on the gpu device
+        Normalized counts to be factorized, already on the gpu device.
+        If None, device must be provided.
+
+    verbose: bool
+        Whether to print the torchnmf progress.
+
+    device : str, torch.device
+        Device to run the NMF on. If None, will use the tens.device attribute.
     
     Returns
     -------
@@ -205,11 +212,15 @@ def nmf_torch(X, nmf_kwargs, tens, verbose=False):
 
     n_iter : int
         Actual number of iterations.
+
     """
     if 'torch' not in dir():
         import torch
     if 'torchnmf' not in dir():
         import torchnmf
+
+    if tens is None:
+        tens = torch.tensor(X).to(device)
 
     NMF_args, NMF_fit_kwargs = _nmf_torch_translate_kwargs(X, nmf_kwargs)
 

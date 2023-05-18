@@ -1,0 +1,13 @@
+setuptools==67.*
+numpy>=1.20,==1.*
+pandas>=1.4,==1.*
+scanpy>=1.7,==1.*
+matplotlib>=3.4,==3.*
+networkx>=3.0,==3.*
+scipy>=1.10,==1.*
+seaborn>=0.12
+scikit-learn>=1.2,==1.*
+yaml>=0.2.5
+pyyaml>=6.0
+fastcluster>=1.2.6
+h5py>=3.8.0
