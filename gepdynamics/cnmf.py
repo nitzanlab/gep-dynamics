@@ -181,27 +181,27 @@ def torch_to_np(tensor):
 
 def nmf_torch(X, nmf_kwargs, tens=None, verbose: bool=False, device=None):
     """
-    Wrapper for torchnmf (gpu), assimilating the keywords to sklearn nmf
-    
+    Wrapper for torchnmf (GPU), assimilating the keywords to sklearn NMF.
+
     Parameters
     ----------
-    X : np.ndarray or sparse.csr.csr_matrix,
-        Data to be factorized - only used for the initiation
+    X : np.ndarray or sparse.csr.csr_matrix
+        Data to be factorized (used only for initiation).
 
-    nmf_kwargs : dict,
-        Arguments format ``sklearn.decomposition.non_negative_factorization``,
-        must include 'n_components' >= 2
-    
-    tens : torch.Tensor
-        Normalized counts to be factorized, already on the gpu device.
-        If None, device must be provided.
+    nmf_kwargs : dict
+        Arguments in the format of `sklearn.decomposition.non_negative_factorization`.
+        It must include 'n_components' with a value greater than or equal to 2.
 
-    verbose: bool
+    tens : torch.Tensor, optional
+        Normalized counts to be factorized, already on the GPU device.
+        If None, the device must be provided.
+
+    verbose : bool, optional
         Whether to print the torchnmf progress.
 
-    device : str, torch.device
-        Device to run the NMF on. If None, will use the tens.device attribute.
-    
+    device : str or torch.device, optional
+        Device to run the NMF on. If None, the `tens.device` attribute will be used.
+
     Returns
     -------
     W : ndarray of shape (n_samples, n_components)
@@ -212,14 +212,14 @@ def nmf_torch(X, nmf_kwargs, tens=None, verbose: bool=False, device=None):
 
     n_iter : int
         Actual number of iterations.
-
     """
     if 'torch' not in dir():
         import torch
     if 'torchnmf' not in dir():
         import torchnmf
 
-    if tens is None:
+    no_tensor = tens is None
+    if no_tensor:
         tens = torch.tensor(X).to(device)
 
     NMF_args, NMF_fit_kwargs = _nmf_torch_translate_kwargs(X, nmf_kwargs)
@@ -243,7 +243,12 @@ def nmf_torch(X, nmf_kwargs, tens=None, verbose: bool=False, device=None):
     ptm.to('cpu')   
     
     del ptm
-    torch.cuda.empty_cache()
+
+    if no_tensor:
+        del tens
+
+    if tens.device.type == "cuda":
+        torch.cuda.empty_cache()
     
     return W, H, n_iter
 
