@@ -68,28 +68,28 @@ kp_30 = sc.read_h5ad(split_adatas_dir.joinpath('08_KP_30w_ND_GEPs.h5ad'))
 
 # %%
 
-adata_a = k_12
-adata_b = k_30
+pairs = [(k_12, k_30), (k_30, k_12), (kp_12, kp_30), (kp_30, kp_12), (k_12, kp_12), (k_30, kp_30)]
 
-comparison_dir = results_dir.joinpath(f"{adata_a.uns['sname']}_{adata_b.uns['sname']}")
+for adata_a, adata_b in pairs:
+    comparison_dir = results_dir.joinpath(f"{adata_a.uns['sname']}_{adata_b.uns['sname']}")
 
-tst = comparator.Comparator(
-    adata_a, adata_a.obsm['usages'], adata_b, comparison_dir, 'torchnmf',
-    max_nmf_iter=800, verbosity=1, )
+    tst = comparator.Comparator(
+        adata_a, adata_a.obsm['usages'], adata_b, comparison_dir, 'torchnmf',
+        max_nmf_iter=800, verbosity=1, )
 
-with warnings.catch_warnings():  # supress convergence warning
-    warnings.simplefilter(action='ignore', category=ConvergenceWarning)
-    tst.extract_geps_on_jointly_hvgs()
+    with warnings.catch_warnings():  # supress convergence warning
+        warnings.simplefilter(action='ignore', category=ConvergenceWarning)
+        tst.extract_geps_on_jointly_hvgs()
 
-tst.decompose_b(repeats=10)
+    tst.decompose_b(repeats=10)
 
-tst.plot_loss_per_cell_histograms(show=False)
-tst.plot_usages_clustermaps(show=False)
-tst.plot_decomposition_comparisons(show=False)
-tst.run_gsea(gprofiler_kwargs=dict(organism='hsapiens', sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
+    tst.plot_loss_per_cell_histograms(show=False)
+    tst.plot_usages_clustermaps(show=False)
+    tst.plot_decomposition_comparisons(show=False)
+    tst.run_gsea(gprofiler_kwargs=dict(organism='hsapiens', sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
 
-tst.calculate_fingerprints()
+    tst.calculate_fingerprints()
 
-tst.print_errors()
+    tst.print_errors()
 
-tst.save_to_file(comparison_dir.joinpath('comparator.npz'))
+    tst.save_to_file(comparison_dir.joinpath('comparator.npz'))
