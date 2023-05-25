@@ -193,7 +193,7 @@ class Comparator(object):
         self.rank_a = self.usages_matrix_a.shape[1]
         self.adata_b = adata_b
 
-        self.results_dir = results_dir
+        self.results_dir = _utils.set_dir(results_dir)
         self.beta_loss = beta_loss
         self.max_nmf_iter = max_nmf_iter
         self.nmf_engine = nmf_engine
@@ -500,9 +500,9 @@ class Comparator(object):
                     best_result = PFNMFResult(
                         name, loss_per_cell, rank, h1.T, h2.T, w1.T, w2.T)
 
-                if self.verbosity:
-                    print(f"repeat {repeat}, after {n_iter} iterations reached"
-                          f"error = {final_loss: .1f}")
+                    if self.verbosity:
+                        print(f"repeat {repeat}, after {n_iter} iterations reached "
+                              f"error = {final_loss: .1f}")
 
             self.pfnmf_results.append(best_result)
 
