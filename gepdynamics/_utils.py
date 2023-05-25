@@ -18,6 +18,7 @@ import scanpy as sc
 
 from scipy.cluster import hierarchy
 from scipy.sparse import csr_matrix
+from scipy.stats import rankdata
 from sklearn.metrics import jaccard_score
 from gprofiler import GProfiler
 
@@ -49,6 +50,44 @@ def fastols(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
     pseudo_inverse = np.linalg.pinv(X)
     return np.dot(pseudo_inverse, Y)
 
+
+def truncated_spearmans_correlation(data, truncation_level: int = 1000,
+                                    smaller_is_better: bool = False, rowvar: bool = True):
+    """
+
+    Parameters
+    ----------
+    data : array_like
+        Input data array.
+    truncation_level : int, optional
+        Maximum value allowed after truncation (default is 1000).
+    smaller_is_better : bool, optional
+        Specifies whether smaller values are considered better (default is False).
+    rowvar : bool, optional
+        Determines whether the row correlation is calculated (True) or the column correlation (False)
+        (default is True).
+
+    Returns
+    -------
+    correlation : ndarray
+        The truncated Spearman's correlation matrix.
+
+    Notes
+    -----
+    The truncated Spearman's correlation is calculated by first ranking the data.
+    Ranks larger than the truncation level are set to the truncation level before
+    calculating the correlation matrix.
+    """
+    if rowvar:  # transpose the data if the row correlation is desired
+        data = data.T
+    if smaller_is_better: # reverse the data if smaller values are considered better
+        data = -data
+
+    n_rows, n_cols = data.shape
+
+    ranked_data = rankdata(data, axis=0)
+    ranked_data[ranked_data > truncation_level] = truncation_level
+    return np.corrcoef(ranked_data, rowvar=False)
 
 def read_matlab_h5_sparse(filename: PathLike) -> csr_matrix:
     with h5py.File(filename, "r") as f:
