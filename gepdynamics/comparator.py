@@ -25,6 +25,8 @@ output:
 
 """
 
+import os
+
 from copy import copy
 from typing import Tuple, Dict, Any, List
 
@@ -192,6 +194,8 @@ class Comparator(object):
         self.usages_matrix_a = usages_matrix_a
         self.rank_a = self.usages_matrix_a.shape[1]
         self.adata_b = adata_b
+        self.a_sname = self.adata_a.uns['sname']
+        self.b_sname = self.adata_b.uns['sname']
 
         self.results_dir = results_dir
         self.beta_loss = beta_loss
@@ -213,6 +217,13 @@ class Comparator(object):
         self.fingerprints = [None] * self.rank_a
 
         self.stage = Stage.INITIALIZED
+
+    def __repr__(self):
+        """
+        String representation of the Comparator object.
+        """
+        return f'Comparator(adata_a={self.a_sname}, adata_b={self.b_sname}) at stage {self.stage}'
+
 
     def save_to_file(self, filename: _utils.PathLike):
         """
@@ -273,7 +284,19 @@ class Comparator(object):
         --------
         >>> comp = Comparator.load_from_file('comp_object.npz', adata_a, adata_b)
         """
+        # make sure the file exists
+        assert os.path.exists(filename), f'File {filename} does not exist'
+
         new_instance = np.load(filename, allow_pickle=True)['obj'].item()
+
+        assert new_instance.a_sname == adata_a.uns['sname'],\
+            f"adata_a's sname ({adata_a.uns['sname']}) does not match the sname" \
+            f" in the loaded object ({new_instance.a_sname})"
+
+        assert new_instance.b_sname == adata_b.uns['sname'],\
+            f"adata_b's sname ({adata_b.uns['sname']}) does not match the sname" \
+            f" in the loaded object ({new_instance.b_sname})"
+
         new_instance.adata_a = adata_a
         new_instance.adata_b = adata_b
         return new_instance
@@ -342,7 +365,7 @@ class Comparator(object):
 
         self.stage = Stage.PREPARED
 
-    def examine_adata_a_decomposition_on_jointly_hvgs(self):
+    def examine_adata_a_decomposition_on_jointly_hvgs(self, show: bool = False, save: bool = True):
         """
         Examine the decomposition of A on jointly HVGs
 
@@ -353,9 +376,44 @@ class Comparator(object):
         un_sns = _utils.plot_usages_norm_clustermaps(k_12, normalized_usages=(H / np.sum(H, axis=0, keepdims=True)).T,
             title='K12 decomposition on HVG', show=True, sns_clustermap_params={'row_colors': row_colors})
 
-        # ToDo: Implement histogram of loss per cell + usages clustermap
         """
-        pass
+
+        if self.stage in (Stage.INITIALIZED):
+            raise RuntimeError('Must extract GEPs on jointly HVGs first')
+
+        dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
+
+        res = self.a_result
+        title = f"{self.a_sname} normalized usages of " \
+                f"original GEPs, k={res.rank}"
+
+        row_colors = pd.concat([
+            pd.Series(self.adata_a.obsm.get('row_colors'),
+                      name='cluster', index=self.adata_a.obs.index),
+            pd.Series(_utils.floats_to_colors(res.loss_per_cell,
+                                              cmap='RdYlGn_r', vmax=1200),
+                      name='residual', index=self.adata_a.obs.index)], axis=1)
+
+        un_sns = _utils.plot_usages_norm_clustermaps(
+            self.adata_a, normalized_usages=res.norm_usages,
+            columns=res.prog_labels_2l, title=title, show=False,
+            sns_clustermap_params={'row_colors': row_colors})
+
+        if save:
+            un_sns.savefig(dec_folder.joinpath(f'{res.name}_normalized_usages_clustermap.png'))
+        if show:
+            un_sns.fig.show()
+        plt.close()
+
+        plt.hist(res.loss_per_cell, bins=25, range=(0, min(2500, res.loss_per_cell.max())))
+        plt.title(f'{res.name} loss per cell distribution')
+
+        if save:
+            plt.savefig(dec_folder.joinpath(f'{res.name}_loss_per_cell_distribution.png'))
+        if show:
+            plt.show()
+        plt.close()
+
 
     def decompose_b(self, repeats: int = 1):
         """
@@ -432,7 +490,7 @@ class Comparator(object):
             'solver': 'mu'}
 
         self.fnmf_result = self._run_nmf(
-            X_b, nmf_kwargs, self.adata_a.uns['sname'], tens, verbose=self.verbosity)
+            X_b, nmf_kwargs, self.a_sname, tens, verbose=self.verbosity)
 
     def _decompose_b_denovo(self, X_b: np.ndarray, tens: 'torch.Tensor' = None):
         """
@@ -477,7 +535,7 @@ class Comparator(object):
             if self.verbosity:
                 print(f"Working on added rank = {added_rank}")
 
-            name = self.adata_a.uns['sname'] + f'e{added_rank}'
+            name = self.a_sname + f'e{added_rank}'
             rank = self.rank_a + added_rank
 
             best_loss = np.infty
@@ -594,14 +652,14 @@ class Comparator(object):
         for res in self._all_results:
             name = res.name
             if 'dn' in name:
-                title = f"{self.adata_b.uns['sname']} normalized usages of " \
+                title = f"{self.b_sname} normalized usages of " \
                         f" de-novo GEPs, k={res.rank}"
             elif res.rank == self.rank_a:
-                title = f"{self.adata_b.uns['sname']} normalized usages of " \
-                        f"{self.adata_a.uns['sname']} GEPs (rank={res.rank})"
+                title = f"{self.b_sname} normalized usages of " \
+                        f"{self.a_sname} GEPs (rank={res.rank})"
             elif res.algorithm == 'pfnmf':
-                title = f"{self.adata_b.uns['sname']} normalized usages of " \
-                        f"{self.adata_a.uns['sname']} GEPs + " \
+                title = f"{self.b_sname} normalized usages of " \
+                        f"{self.a_sname} GEPs + " \
                         f"{res.rank - self.rank_a} novel GEPs"
 
             row_colors = pd.concat([
@@ -634,8 +692,8 @@ class Comparator(object):
         comp_folder = _utils.set_dir(self.results_dir.joinpath('comparisons'))
 
         for dn_res, pf_res in zip(self.denovo_results, [self.fnmf_result, *self.pfnmf_results]):
-            title = f"{self.adata_b.uns['sname']} normalized usages of de-novo " \
-                    f"GEPs and k_12 GEPs + {pf_res.rank - self.rank_a} novel GEPs"
+            title = f"{self.b_sname} normalized usages of de-novo " \
+                    f"GEPs and {self.a_sname} GEPs + {pf_res.rank - self.rank_a} novel GEPs"
 
             joint_usages = np.concatenate([dn_res.norm_usages, pf_res.norm_usages], axis=1)
             joint_labels = dn_res.prog_labels_2l + pf_res.prog_labels_2l
@@ -709,7 +767,7 @@ class Comparator(object):
 
     def calculate_fingerprints(self, truncation_level: int = 1000):
         """
-        # ToDo: plot usages heatplots
+        # ToDo: plot usages heatmaps (currently using csv to excel)
 
         """
         corr_a_vs_denovo = self._calculate_gene_coefs_tsc_a_denovo(truncation_level)
@@ -726,7 +784,7 @@ class Comparator(object):
             self.fingerprints[i] = df.reset_index(drop=True)
 
         # save to file:
-        csv_path = self.results_dir.joinpath('fingerprints.csv')
+        csv_path = self.results_dir.joinpath(f"fingerprints_{self.a_sname}_{self.b_sname}.csv")
         separator = pd.DataFrame({'Separator': ['']})
 
         self.fingerprints[0].to_csv(csv_path, index=False)
@@ -745,14 +803,14 @@ class Comparator(object):
                                    'dn_usage_gep', 'dn_usage_corr']
                           ).astype({'dn_coef_tsc': float, 'dn_usage_corr': float})
 
-        df.pfnmf_gep = self.a_result.prog_names
+        df.pfnmf_gep = self.a_result.prog_labels_1l
 
         tsc = _utils.truncated_spearmans_correlation(pd.concat(
             [self.a_result.gene_coefs, dn_res.gene_coefs], axis=1),
             truncation_level=truncation_level, rowvar=False)[:self.rank_a, self.rank_a:]
 
         argmax_geps = np.argmax(tsc, axis=1)
-        df.dn_coef_gep = [dn_res.prog_names[i] for i in argmax_geps]
+        df.dn_coef_gep = [dn_res.prog_labels_1l[i] for i in argmax_geps]
         df.dn_coef_tsc = tsc[np.arange(self.rank_a), argmax_geps]
 
         return df
@@ -783,7 +841,7 @@ class Comparator(object):
             df = pd.DataFrame(columns=['pfnmf_gep', 'dn_coef_gep', 'dn_coef_tsc',
                                        'dn_usage_gep', 'dn_usage_corr']
                               ).astype({'dn_coef_tsc': float, 'dn_usage_corr': float})
-            df.pfnmf_gep = pf_res.prog_names[:self.rank_a]
+            df.pfnmf_gep = pf_res.prog_labels_1l[:self.rank_a]
 
             # gene coefficients TSC:
             tsc = _utils.truncated_spearmans_correlation(pd.concat(
@@ -791,7 +849,7 @@ class Comparator(object):
                 truncation_level=truncation_level, rowvar=False)[:self.rank_a, self.rank_a:]
 
             argmax_geps = np.argmax(tsc, axis=1)
-            df.dn_coef_gep = [dn_res.prog_names[i] for i in argmax_geps]
+            df.dn_coef_gep = [dn_res.prog_labels_1l[i] for i in argmax_geps]
             df.dn_coef_tsc = tsc[np.arange(self.rank_a), argmax_geps]
 
             # usage correlation:
@@ -800,7 +858,7 @@ class Comparator(object):
                 rowvar=False)[:self.rank_a, self.rank_a:]
 
             argmax_geps = np.argmax(usage_corr, axis=1)
-            df.dn_usage_gep = [dn_res.prog_names[i] for i in argmax_geps]
+            df.dn_usage_gep = [dn_res.prog_labels_1l[i] for i in argmax_geps]
             df.dn_usage_corr = usage_corr[np.arange(self.rank_a), argmax_geps]
 
             output.append(df)
