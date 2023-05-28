@@ -64,8 +64,8 @@ class NMFResultBase(object):
 
     def calculate_prog_labels(self):
         self.prog_percentages = self.norm_usages.sum(axis=0) * 100 / len(self.loss_per_cell)
-        self.prog_labels_1l = [name + f' ({self.prog_percentages[i]: 0.1f}%)' for i, name in enumerate(self.prog_names)]
-        self.prog_labels_2l = [name + f'\n({self.prog_percentages[i]: 0.1f}%)' for i, name in enumerate(self.prog_names)]
+        self.prog_labels_1l = [name + f' ({self.prog_percentages[i]:0.1f}%)' for i, name in enumerate(self.prog_names)]
+        self.prog_labels_2l = [name + f'\n({self.prog_percentages[i]:0.1f}%)' for i, name in enumerate(self.prog_names)]
 
     @staticmethod
     def aggregate_results(results: list) -> Tuple[list, list, np.ndarray, list]:
