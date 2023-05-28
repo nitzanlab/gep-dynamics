@@ -221,7 +221,8 @@ def nmf_torch(X, nmf_kwargs, tens=None, verbose: bool=False, device=None):
     no_tensor = tens is None
     if no_tensor:
         tens = torch.tensor(X).to(device)
-
+    device_type = tens.device.type
+    
     NMF_args, NMF_fit_kwargs = _nmf_torch_translate_kwargs(X, nmf_kwargs)
 
     # torchnmf replaces the W and H, meaning V = H @ W.T
@@ -247,7 +248,7 @@ def nmf_torch(X, nmf_kwargs, tens=None, verbose: bool=False, device=None):
     if no_tensor:
         del tens
 
-    if tens.device.type == "cuda":
+    if device_type == "cuda":
         torch.cuda.empty_cache()
     
     return W, H, n_iter

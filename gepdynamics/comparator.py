@@ -197,7 +197,7 @@ class Comparator(object):
         self.a_sname = self.adata_a.uns['sname']
         self.b_sname = self.adata_b.uns['sname']
 
-        self.results_dir = results_dir
+        self.results_dir = _utils.set_dir(results_dir)
         self.beta_loss = beta_loss
         self.max_nmf_iter = max_nmf_iter
         self.nmf_engine = nmf_engine
@@ -558,9 +558,9 @@ class Comparator(object):
                     best_result = PFNMFResult(
                         name, loss_per_cell, rank, h1.T, h2.T, w1.T, w2.T)
 
-                if self.verbosity:
-                    print(f"repeat {repeat}, after {n_iter} iterations reached"
-                          f"error = {final_loss: .1f}")
+                    if self.verbosity:
+                        print(f"repeat {repeat}, after {n_iter} iterations reached "
+                              f"error = {final_loss: .1f}")
 
             self.pfnmf_results.append(best_result)
 
