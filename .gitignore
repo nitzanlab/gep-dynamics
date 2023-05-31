@@ -15,7 +15,6 @@ _
 *.h5ad
 *.npy
 *.npz
-*.xlsx
 
 # python caches
 *.py[cod]

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 from enum import Enum
 
 from seaborn import cubehelix_palette
@@ -8,6 +9,8 @@ from seaborn import cubehelix_palette
 PROJECT_HOME_PATH = {
     'linux': '/cs/labs/mornitzan/yotamcon/gep-dynamics',
     'darwin': '/Users/yotamcon/projects/gep-dynamics'}
+
+EXCEL_FINGERPRINT_TEMPLATE = os.path.join(os.path.dirname(__file__), 'static', 'fingerprint_template.xlsx')
 
 ## Constants
 # Data parameters

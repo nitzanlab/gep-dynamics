@@ -37,12 +37,13 @@ import scanpy as sc
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from openpyxl import load_workbook
 from sklearn.decomposition import _nmf as sknmf
 
 import gepdynamics._utils as _utils
 import gepdynamics.cnmf as cnmf
 from gepdynamics import pfnmf
-from gepdynamics._constants import NMFEngine, Stage, NUMBER_HVG, NMF_TOLERANCE
+from gepdynamics._constants import NMFEngine, Stage, NUMBER_HVG, NMF_TOLERANCE, EXCEL_FINGERPRINT_TEMPLATE
 
 
 class NMFResultBase(object):
@@ -913,13 +914,29 @@ class Comparator(object):
 
         # save to file:
         csv_path = self.results_dir.joinpath(f"fingerprints_{self.a_sname}_{self.b_sname}.csv")
+        excel_template = load_workbook(EXCEL_FINGERPRINT_TEMPLATE)
+        xlsx_path = self.results_dir.joinpath(f"fingerprints_{self.a_sname}_{self.b_sname}.xlsx")
+
         separator = pd.DataFrame({'Separator': ['']})
 
+        # saving to csv
         self.fingerprints[0].to_csv(csv_path, index=False)
         for i in range(1, self.rank_a):
             # separating line between the tables
             separator.to_csv(csv_path, mode='a', index=False, header=False)
             self.fingerprints[i].to_csv(csv_path, mode='a', index=False)
+
+        # saving to excel
+        line_offset = 0
+        for index, df in enumerate(self.fingerprints):
+            for col in range(0, df.shape[1]):
+                excel_template.active.cell(line_offset + 1, col + 1).value = df.columns[col]
+
+                for row in range(0, df.shape[0]):
+                    excel_template.active.cell(line_offset + row + 2, col + 1).value = df.iloc[row, col]
+            line_offset += df.shape[0] + 2
+        excel_template.save(xlsx_path)
+        excel_template.close()
 
     def _calculate_gene_coefs_tsc_a_denovo(self, truncation_level: int = 1000):
         """
