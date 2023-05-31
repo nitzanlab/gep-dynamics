@@ -26,6 +26,7 @@ output:
 """
 
 import os
+import resource
 
 from copy import copy
 from typing import Tuple, Dict, Any, List
@@ -113,6 +114,114 @@ class NMFResultBase(object):
             index=gene_index,
             columns=self.prog_names)
 
+    def get_top_genes(self, n: int = 100) -> pd.DataFrame:
+        """
+        Return a dataframe with the top genes coefficients for each program.
+        """
+        return pd.DataFrame([self.gene_coefs.nlargest(n, prog).index.tolist()
+                             for prog in self.prog_names], index=self.prog_names).T
+
+    def plot_loss_per_cell_histogram(self, bins: int = 25, max_value: float = 2500,
+                                     saving_folder: _utils.PathLike = None,
+                                     save: bool = True, show: bool = False):
+        """
+        Plot the histogram of loss per cell.
+
+        Parameters:
+        ----------
+        bins : int, optional
+            Number of bins for the histogram (default is 25).
+        max_value : float, optional
+            Maximum value to consider for the histogram range (default is 2500).
+        saving_folder : _utils.PathLike, optional
+            Path to the folder where the plot will be saved (default is None).
+        save : bool, optional
+            Whether to save the plot as an image file (default is True).
+        show : bool, optional
+            Whether to display the plot (default is False).
+
+        Raises:
+        -------
+        ValueError
+            If `saving_folder` is not specified when `save=True`.
+
+        Returns:
+        --------
+        None
+        """
+        if saving_folder is None and save:
+            raise ValueError('saving_folder must be specified if save=True')
+
+        dec_folder = _utils.set_dir(saving_folder)
+
+        plt.hist(self.loss_per_cell, bins=bins, range=(0, min(max_value, self.loss_per_cell.max())))
+        plt.title(f'{self.name} loss per cell distribution')
+
+        if save:
+            plt.savefig(saving_folder.joinpath(f'{self.name}_loss_per_cell_distribution.png'))
+        if show:
+            plt.show()
+        plt.close()
+
+    def plot_correlations_heatmaps(self, tsc_truncation_level: int = 1000,
+                                   saving_folder: _utils.PathLike = None,
+                                   save: bool = True, show: bool = False):
+        """
+        Plot the heatmaps for the usage and gene coefficients correlations.
+
+        Usages correlation is calculated as Pearson correlation. gene coefficients
+        correlation is calcualted as truncated spearman correlation with a cutoff
+        of `tsc_truncation_level` genes.
+
+        Parameters:
+        ----------
+        tsc_truncation_level : int, optional
+            Number of top ranked genes for the truncated spearman correlation
+            of the gene coefficients (default is 1000).
+        saving_folder : _utils.PathLike, optional
+            Path to the folder where the plots will be saved (default is None).
+        save : bool, optional
+            Whether to save the plots as image files (default is True).
+        show : bool, optional
+            Whether to display the plots (default is False).
+
+        Raises:
+        -------
+        ValueError
+            If `saving_folder` is not specified when `save=True`.
+
+        Returns:
+        --------
+        None
+        """
+        if saving_folder is None and save:
+            raise ValueError('saving_folder must be specified if save=True')
+
+        dec_folder = _utils.set_dir(saving_folder)
+
+        # parameters for genes heatmap
+        df_genes = pd.DataFrame(_utils.truncated_spearmans_correlation(
+            self.gene_coefs, truncation_level=tsc_truncation_level, rowvar=False),
+            index=self.prog_names, columns=self.prog_names)
+        title_genes = f'{self.name} gene coefficients truncated spearman correlation'
+        file_genes = dec_folder.joinpath(f'{self.name}_correlations_gene_coefficients.png')
+
+        # parameters for usages heatmap
+        df_usages = pd.DataFrame(np.corrcoef(self.norm_usages, rowvar=False),
+                          index=self.prog_names, columns=self.prog_names)
+        title_usage = f'{self.name} usages correlation'
+        file_usage = dec_folder.joinpath(f'{self.name}_correlations_usages.png')
+
+        for df, title, file in [(df_genes, title_genes, file_genes), (df_usages, title_usage, file_usage)]:
+            sns.heatmap(df, cmap='RdYlGn', annot=True, fmt='.2f', vmin=0, vmax=1, square=True)
+            plt.title(title)
+            plt.tight_layout()
+
+            if save:
+                plt.savefig(file)
+            if show:
+                plt.show()
+            plt.close()
 
 class NMFResult(NMFResultBase):
     def __init__(self, name, loss_per_cell, rank, W, H):
@@ -377,13 +486,16 @@ class Comparator(object):
             title='K12 decomposition on HVG', show=True, sns_clustermap_params={'row_colors': row_colors})
 
         """
-
         if self.stage in (Stage.INITIALIZED):
             raise RuntimeError('Must extract GEPs on jointly HVGs first')
 
+        res = self.a_result
         dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
 
-        res = self.a_result
+        # correlations heatmap
+        res.plot_correlations_heatmaps(saving_folder=dec_folder, show=show, save=save)
+
+        # clustermap of normalized usages
         title = f"{self.a_sname} normalized usages of " \
                 f"original GEPs, k={res.rank}"
 
@@ -405,6 +517,7 @@ class Comparator(object):
             un_sns.fig.show()
         plt.close()
 
+        # loss per cell histogram
         plt.hist(res.loss_per_cell, bins=25, range=(0, min(2500, res.loss_per_cell.max())))
         plt.title(f'{res.name} loss per cell distribution')
 
@@ -586,17 +699,23 @@ class Comparator(object):
         for result in self._all_results:
             print(f"{result.name} error = {result.loss: .1f}")
 
-    def plot_loss_per_cell_histograms(self, bins: int = 25, max_hist_value: float = 2500, max_kde_value: float = 2000, show: bool = False, save: bool = True):
+    def examine_adata_b_decompositions(self, max_kde_value: float = 2000,
+                                       hist_bins: int = 25, hist_max_value: float = 2500,
+                                       show: bool = False, save: bool = True):
         """
-        Plot the histogram of the loss per cell for each decomposition,
-        violin plots of the loss per cell for the decomposition together,
-        and the KDE of the loss per cell for the decomposition together.
+        Plot the results of the decompositions of timepoint B data
+
+        plots:
+        1. Usages and gene coefficients correlations for each decomposition
+        2. Histogram of the loss per cell for each decomposition separatly
+        3. Violin plots of the loss per cell for the decompositions,
+        4. Joint Kernel Density Estimation of the loss per cell.
 
         Parameters
         ----------
-        bins : int, optional
+        hist_bins : int, optional
             Number of bins for the histogram. Defaults to 20.
-        max_hist_value: float, optional
+        hist_max_value: float, optional
             maximum value of x in the histograms. Defaults to 2500.
         max_kde_value: float, optional
             maximum value of x in the KDE comparison. Defaults to 2000.
@@ -606,19 +725,36 @@ class Comparator(object):
             Whether to save the plot as an image. Defaults to True.
         """
         if self.stage in (Stage.INITIALIZED, Stage.PREPARED):
-            raise RuntimeError('Must decompose before plotting error per cell histograms')
+            raise RuntimeError('Must decompose before examining decompositions')
 
         dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
 
         for result in self._all_results:
-            plt.hist(result.loss_per_cell, bins=bins, range=(0, min(max_hist_value, result.loss_per_cell.max())))
-            plt.title(f'{result.name} loss per cell distribution')
+            result.plot_correlations_heatmaps(
+                saving_folder=dec_folder, show=show, save=save)
+            result.plot_loss_per_cell_histogram(
+                bins=hist_bins, max_value=hist_max_value,
+                saving_folder=dec_folder, show=show, save=save)
+        
+        self._plot_loss_per_cell_histograms(max_kde_value, show, save)
+        self._plot_usages_clustermaps(show, save)
 
-            if save:
-                plt.savefig(dec_folder.joinpath(f'{result.name}_loss_per_cell_distribution.png'))
-            if show:
-                plt.show()
-            plt.close()
+    def _plot_loss_per_cell_histograms(self, max_kde_value: float = 2000, show: bool = False, save: bool = True):
+        """
+        Plot the histogram of the loss per cell for each decomposition,
+        violin plots of the loss per cell for the decomposition together,
+        and the KDE of the loss per cell for the decomposition together.
+
+        Parameters
+        ----------
+        max_kde_value: float, optional
+            maximum value of x in the KDE comparison. Defaults to 2000.
+        show : bool, optional
+            Whether to display the plot. Defaults to False.
+        save : bool, optional
+            Whether to save the plot as an image. Defaults to True.
+        """
+        dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
 
         df = pd.concat([pd.Series(res.loss_per_cell, name=res.name) for res in self._all_results], axis=1)
         df = pd.melt(df, var_name='decomposition', value_name='loss per cell')
@@ -640,13 +776,10 @@ class Comparator(object):
             plt.show()
         plt.close()
 
-    def plot_usages_clustermaps(self, show: bool = False, save: bool = True):
+    def _plot_usages_clustermaps(self, show: bool = False, save: bool = True):
         """
         Plot the usages of the decomposed GEPs as clustermaps
         """
-        if self.stage in (Stage.INITIALIZED, Stage.PREPARED):
-            raise RuntimeError('Must decompose before plotting usages clustermaps')
-
         dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
 
         for res in self._all_results:
@@ -709,8 +842,9 @@ class Comparator(object):
                 un_sns.fig.show()
             plt.close()
 
-            plt.plot([0, max_cell_loss], [0, max_cell_loss], 'r-')
-            plt.scatter(dn_res.loss_per_cell, pf_res.loss_per_cell, s=2)
+            plt.plot([0, max_cell_loss], [0, max_cell_loss], 'k-')
+            plt.scatter(dn_res.loss_per_cell, pf_res.loss_per_cell, s=2,
+                        c=self.adata_b.obsm.get('row_colors'))
             plt.xlabel(f'{dn_res.name} loss per cell')
             plt.ylabel(f'{pf_res.name} loss per cell')
             plt.title('Comparison of loss per cell using two decompositions')
@@ -725,7 +859,12 @@ class Comparator(object):
         Run gene set enrichment analysis on all the decomposed GEPs
         """
         if self.stage in (Stage.INITIALIZED, Stage.PREPARED):
-            raise RuntimeError('Must decompose before plotting error per cell histograms')
+            raise RuntimeError('Must decompose before running GSEA on decompositions')
+
+        programs_top_genes_dir = _utils.set_dir(self.results_dir.joinpath('programs_top_genes'))
+        for res in [self.a_result, *self._all_results]:
+            top_genes_df = res.get_top_genes(n_top_genes)
+            top_genes_df.to_csv(programs_top_genes_dir.joinpath(f'{res.name}_top_genes.csv'))
 
         if gprofiler_kwargs is None:
             gprofiler_kwargs = {}
@@ -767,7 +906,7 @@ class Comparator(object):
 
     def calculate_fingerprints(self, truncation_level: int = 1000):
         """
-        # ToDo: plot usages heatmaps (currently using csv to excel)
+        # ToDo: plot fingerprints as heatmaps (currently using csv to excel)
 
         """
         corr_a_vs_denovo = self._calculate_gene_coefs_tsc_a_denovo(truncation_level)
@@ -800,7 +939,8 @@ class Comparator(object):
         dn_res = self.denovo_results[0]
 
         df = pd.DataFrame(columns=['pfnmf_gep', 'dn_coef_gep', 'dn_coef_tsc',
-                                   'dn_usage_gep', 'dn_usage_corr']
+                                   'dn_usage_gep', 'dn_usage_corr',
+                                   'dn_coef_gep_2nd', 'dn_coef_tsc_2nd']
                           ).astype({'dn_coef_tsc': float, 'dn_usage_corr': float})
 
         df.pfnmf_gep = self.a_result.prog_labels_1l
@@ -809,9 +949,13 @@ class Comparator(object):
             [self.a_result.gene_coefs, dn_res.gene_coefs], axis=1),
             truncation_level=truncation_level, rowvar=False)[:self.rank_a, self.rank_a:]
 
-        argmax_geps = np.argmax(tsc, axis=1)
+        argmax_geps = np.argsort(tsc, axis=1)[:, -1]
         df.dn_coef_gep = [dn_res.prog_labels_1l[i] for i in argmax_geps]
         df.dn_coef_tsc = tsc[np.arange(self.rank_a), argmax_geps]
+
+        arg_second_max_geps = np.argsort(tsc, axis=1)[:, -2]
+        df.dn_coef_gep_2nd = [dn_res.prog_labels_1l[i] for i in arg_second_max_geps]
+        df.dn_coef_tsc_2nd = tsc[np.arange(self.rank_a), arg_second_max_geps]
 
         return df
 
@@ -839,7 +983,8 @@ class Comparator(object):
         output = []
         for dn_res, pf_res in zip(self.denovo_results, [self.fnmf_result, *self.pfnmf_results]):
             df = pd.DataFrame(columns=['pfnmf_gep', 'dn_coef_gep', 'dn_coef_tsc',
-                                       'dn_usage_gep', 'dn_usage_corr']
+                                       'dn_usage_gep', 'dn_usage_corr',
+                                       'dn_coef_gep_2nd', 'dn_coef_tsc_2nd']
                               ).astype({'dn_coef_tsc': float, 'dn_usage_corr': float})
             df.pfnmf_gep = pf_res.prog_labels_1l[:self.rank_a]
 
@@ -851,6 +996,10 @@ class Comparator(object):
             argmax_geps = np.argmax(tsc, axis=1)
             df.dn_coef_gep = [dn_res.prog_labels_1l[i] for i in argmax_geps]
             df.dn_coef_tsc = tsc[np.arange(self.rank_a), argmax_geps]
+
+            arg_second_max_geps = np.argsort(tsc, axis=1)[:, -2]
+            df.dn_coef_gep_2nd = [dn_res.prog_labels_1l[i] for i in arg_second_max_geps]
+            df.dn_coef_tsc_2nd = tsc[np.arange(self.rank_a), arg_second_max_geps]
 
             # usage correlation:
             usage_corr = np.corrcoef(np.concatenate(
