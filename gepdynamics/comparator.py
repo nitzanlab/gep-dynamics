@@ -477,14 +477,6 @@ class Comparator(object):
     def examine_adata_a_decomposition_on_jointly_hvgs(self, show: bool = False, save: bool = True):
         """
         Examine the decomposition of A on jointly HVGs
-
-        old code:
-        row_colors = pd.concat([pd.Series(k_12.obsm.get('row_colors'), name='cluster', index=k_12.obs.index),
-                       pd.Series(_utils.floats_to_colors(loss_per_cell, cmap='RdYlGn_r', vmax=1000), name='residual', index=k_12.obs.index)], axis=1)
-
-        un_sns = _utils.plot_usages_norm_clustermaps(k_12, normalized_usages=(H / np.sum(H, axis=0, keepdims=True)).T,
-            title='K12 decomposition on HVG', show=True, sns_clustermap_params={'row_colors': row_colors})
-
         """
         if self.stage in (Stage.INITIALIZED):
             raise RuntimeError('Must extract GEPs on jointly HVGs first')
@@ -508,13 +500,12 @@ class Comparator(object):
 
         un_sns = _utils.plot_usages_norm_clustermaps(
             self.adata_a, normalized_usages=res.norm_usages,
-            columns=res.prog_labels_2l, title=title, show=False,
+            columns=res.prog_labels_2l, title=title, show=show,
             sns_clustermap_params={'row_colors': row_colors})
 
         if save:
             un_sns.savefig(dec_folder.joinpath(f'{res.name}_normalized_usages_clustermap.png'))
-        if show:
-            un_sns.fig.show()
+
         plt.close()
 
         # loss per cell histogram
@@ -804,13 +795,12 @@ class Comparator(object):
 
             un_sns = _utils.plot_usages_norm_clustermaps(
                 self.adata_b, normalized_usages=res.norm_usages,
-                columns=res.prog_labels_2l, title=title, show=False,
+                columns=res.prog_labels_2l, title=title, show=show,
                 sns_clustermap_params={'row_colors': row_colors})
 
             if save:
                 un_sns.savefig(dec_folder.joinpath(f'{res.name}_normalized_usages_clustermap.png'))
-            if show:
-                un_sns.fig.show()
+
             plt.close()
 
     def plot_decomposition_comparisons(self, show: bool = False,
@@ -834,12 +824,11 @@ class Comparator(object):
 
             un_sns = _utils.plot_usages_norm_clustermaps(
                 self.adata_b, normalized_usages=joint_usages, columns=joint_labels,
-                title=title, show=False, sns_clustermap_params={'col_colors': joint_colors})
+                title=title, show=show, sns_clustermap_params={'col_colors': joint_colors})
 
             if save:
                 un_sns.savefig(comp_folder.joinpath(f'{dn_res.name}_vs_{pf_res.name}_normalized_usages_clustermap.png'))
-            if show:
-                un_sns.fig.show()
+
             plt.close()
 
             plt.plot([0, max_cell_loss], [0, max_cell_loss], 'k-')
