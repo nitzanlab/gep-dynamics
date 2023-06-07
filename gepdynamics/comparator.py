@@ -31,6 +31,7 @@ import resource
 from copy import copy
 from typing import Tuple, Dict, Any, List
 
+import networkx as nx
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -39,6 +40,7 @@ import seaborn as sns
 
 from openpyxl import load_workbook
 from sklearn.decomposition import _nmf as sknmf
+from scipy.cluster import hierarchy
 
 import gepdynamics._utils as _utils
 import gepdynamics.cnmf as cnmf
@@ -70,7 +72,7 @@ class NMFResultBase(object):
         self.prog_labels_2l = [name + f'\n({self.prog_percentages[i]:0.1f}%)' for i, name in enumerate(self.prog_names)]
 
     @staticmethod
-    def aggregate_results(results: list) -> Tuple[list, list, np.ndarray, list]:
+    def aggregate_results(results: List['NMFResultBase']) -> Tuple[list, list, np.ndarray, list]:
         """
         Aggregate results from a list of NMFResult objects.
 
@@ -727,9 +729,14 @@ class Comparator(object):
             result.plot_loss_per_cell_histogram(
                 bins=hist_bins, max_value=hist_max_value,
                 saving_folder=dec_folder, show=show, save=save)
-        
+
         self._plot_loss_per_cell_histograms(max_kde_value, show, save)
         self._plot_usages_clustermaps(show, save)
+
+        self.plot_correlations_flow_chart([self.fnmf_result, *self.pfnmf_results, *self.denovo_results[::-1]],
+                                          usage_corr_threshold = 0.25,
+                                          tsc_threshold = 0.25,
+                                          show=show, save=save)
 
     def _plot_loss_per_cell_histograms(self, max_kde_value: float = 2000, show: bool = False, save: bool = True):
         """
@@ -840,6 +847,53 @@ class Comparator(object):
             plt.title('Comparison of loss per cell using two decompositions')
             if save:
                 plt.savefig(comp_folder.joinpath(f'{dn_res.name}_vs_{pf_res.name}_loss_per_cell.png'))
+            if show:
+                plt.show()
+            plt.close()
+
+    def plot_correlations_flow_chart(self, results: List['NMFResultBase'],
+                                     usage_corr_threshold: float = 0.3,
+                                     tsc_threshold: float = 0.3,
+                                     tsc_truncation_level: int = 1000,
+                                     show: bool = False, save: bool = True):
+        """
+        Plot a flow chart of the correlations between the decompositions
+
+        """
+        if self.stage in (Stage.INITIALIZED, Stage.PREPARED):
+            raise RuntimeError('Must decompose before plotting correlations')
+
+        comparisons_folder = _utils.set_dir(self.results_dir.joinpath('comparisons'))
+
+        names_list = [res.name for res in results]
+        ks, joint_names, joint_usages, joint_labels = NMFResultBase.aggregate_results(results)
+
+        prog_names_dict = {res.name: res.prog_names for res in results}
+
+        # usages flow graph
+        usages_title = f'Correlations flow chart of usages'
+        usages_filename = f'flow_chart_usages_{"_".join(names_list)}.png'
+        usages_adjacency = self._get_ordered_adjacency_matrix(
+            np.corrcoef(joint_usages.T), joint_names, ks, usage_corr_threshold, verbose = self.verbosity)
+
+        # genes flow graph
+        genes_title = f'Correlations flow chart of gene coefficients'
+        genes_filename = f'flow_chart_genes_{"_".join(names_list)}.png'
+
+        tsc = _utils.truncated_spearmans_correlation(pd.concat(
+            [res.gene_coefs for res in results], axis = 1),
+            truncation_level = tsc_truncation_level, rowvar = False)
+
+        genes_adjacency = self._get_ordered_adjacency_matrix(
+            tsc, joint_names, ks, tsc_threshold, verbose = self.verbosity)
+
+        for adjacency, title, filename in [(usages_adjacency, usages_title, usages_filename),
+                                           (genes_adjacency, genes_title, genes_filename)]:
+            fig = self._plot_layered_correlation_flow_chart(
+                names_list, adjacency, prog_names_dict, title)
+
+            if save:
+                fig.savefig(comparisons_folder.joinpath(filename))
             if show:
                 plt.show()
             plt.close()
@@ -1019,12 +1073,6 @@ class Comparator(object):
             output.append(df)
         return output
 
-    def plot_fingerprint(self):
-        """
-        Input the correlation results to the fingerprint surrogate table
-        """
-        pass
-
     @staticmethod
     def _run_nmf(x, nmf_kwargs, name, tens: 'torch.Tensor' = None, verbose: int = 0) -> NMFResult:
         if tens is not None:
@@ -1043,4 +1091,96 @@ class Comparator(object):
             rank=W.shape[1],
             W=W,
             H=H)
+
+    @staticmethod
+    def _get_ordered_adjacency_matrix(correlation_matrix, prog_names, ranks, threshold=0.2, verbose: bool = False):
+        """
+        Given a correlation matrix to base the adjacency matrix on, returns the
+        adjacency matrix after filtering out edges with correlation below the threshold
+        and keeping only edges between consecutive layers.
+        """
+        # adjacency matrix creation
+        adjacency = pd.DataFrame(np.round((correlation_matrix), 2),
+                              index=prog_names, columns=prog_names)
+
+        # order
+        linkage = hierarchy.linkage(
+            adjacency, method='average', metric='euclidean')
+        prog_order = hierarchy.leaves_list(
+            hierarchy.optimal_leaf_ordering(linkage, adjacency))
+
+        # keeping only edges between consecutive layers
+        for i in range(len(ranks) - 2):
+            adjacency.values[:np.sum(ranks[:i + 1]), np.sum(ranks[:i + 2]):] = 0
+            adjacency.values[np.sum(ranks[:i + 2]):, :np.sum(ranks[:i + 1])] = 0
+
+        np.fill_diagonal(adjacency.values, 0)
+        adjacency.values[adjacency.values <= threshold] = 0
+
+        if verbose:
+            print(f'Number of edges={np.count_nonzero(adjacency)}')
+
+        # ordering the nodes for display
+        adjacency = adjacency.iloc[prog_order, prog_order]
+
+        return adjacency
+
+    @staticmethod
+    def _plot_layered_correlation_flow_chart(layer_keys, adjacency_df: pd.DataFrame,
+                                            prog_names_dict, title: str,
+                                            plt_figure_kwargs: Dict = None,
+                                            fig_title_kwargs: Dict = None):
+        """
+        Plotting the flow chart of the correlation matrix between layers.
+        """
+        # setting figure arguments
+        figure_kwargs = {'figsize': (14.4, 16.2), 'dpi': 100}
+        if plt_figure_kwargs is not None: figure_kwargs.update(plt_figure_kwargs)
+
+        title_kwargs = {'fontsize': 25, 'y': 0.95}
+        if fig_title_kwargs is not None: title_kwargs.update(fig_title_kwargs)
+
+        # mapping adata short name to layer number
+        name_map = dict(zip(layer_keys, range(len(layer_keys))))
+
+        # create the graph object
+        G = nx.from_numpy_array(adjacency_df.values, create_using=nx.Graph)
+        nx.relabel_nodes(G, lambda i: adjacency_df.index[i], copy=False)
+        nx.set_node_attributes(
+            G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
+
+        # prepare graph for display
+        layout = nx.multipartite_layout(G, subset_key='layer')
+
+        edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
+        edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
+
+        if len(layer_keys) > 2:
+            for layer in {data['layer'] for key, data in G.nodes.data()}:
+                nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
+
+                angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+
+                for i, node in enumerate(nodes):
+                    layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
+
+        fig, ax = plt.subplots(1, 1, **figure_kwargs)
+        nx.draw(G, layout, node_size=3000, with_labels=False, edge_color=weights,
+                edge_vmin=0, edge_vmax=1., width=edge_width, ax=ax)
+
+        cmp = plt.matplotlib.cm.ScalarMappable(plt.matplotlib.colors.Normalize(vmin=0, vmax=1))
+        plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(18, 5, 86))
+
+        # change color of layers
+        for key in layer_keys:
+            nx.draw_networkx_nodes(
+                G, layout, node_size=2800, nodelist=prog_names_dict[key],
+                # node_color=coloring_scheme[key],
+                ax=ax)
+        nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
+
+        plt.suptitle(title, **title_kwargs)
+
+        plt.tight_layout()
+        return fig
 
