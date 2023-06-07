@@ -13,6 +13,9 @@
 #     name: python3
 # ---
 
+# %% [markdown]
+# # Running the comparator between Marjanovic et. al. time points
+
 # %%
 # %%time
 # %load_ext autoreload
@@ -67,6 +70,19 @@ kp_30 = sc.read_h5ad(split_adatas_dir.joinpath('08_KP_30w_ND_GEPs.h5ad'))
 # ### Comparing Kras 12 and 30 weeks
 
 # %%
+import numpy as np
+def load_from_file(filename: _utils.PathLike, adata_a: sc.AnnData, adata_b: sc.AnnData) -> 'Comparator':
+    # make sure the file exists
+    assert os.path.exists(filename), f'File {filename} does not exist'
+
+    new_instance = np.load(filename, allow_pickle=True)['obj'].item()
+
+    new_instance.adata_a = adata_a
+    new_instance.adata_b = adata_b
+    return new_instance
+
+
+# %%
 
 pairs = [(k_12, k_30), (k_30, k_12), (kp_12, kp_30), (kp_30, kp_12), (k_12, kp_12), (k_30, kp_30)]
 
@@ -93,3 +109,15 @@ for adata_a, adata_b in pairs:
     tst.print_errors()
 
     tst.save_to_file(comparison_dir.joinpath('comparator.npz'))
+
+# %%
+for adata_a, adata_b in [(k_12, k_30), (k_30, k_12), (k_12, kp_12),
+                         (k_30, kp_30), (kp_12, kp_30), (kp_30, kp_12)]:
+    comparison_dir = results_dir.joinpath(f"{adata_a.uns['sname']}_{adata_b.uns['sname']}", 'comparator.npz')
+    
+    tst = comparator.Comparator.load_from_file(comparison_dir, adata_a, adata_b)
+    for res in tst._all_results:
+        res.calculate_prog_labels()
+    tst.a_result.calculate_prog_labels()
+    
+    tst.save_to_file(comparison_dir)

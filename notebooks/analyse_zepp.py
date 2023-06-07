@@ -15,11 +15,12 @@
 # ---
 
 # %% [markdown]
-# # Downloading, pre-processing and running cNMF on marjanovic et. al 2020 data
-# 1. Obtaining the data and creating AnnData object
-# 2. filtering genes and selecting joint highly variable genes (HVGs) and showing key statistics
-# 3. Splitting the dataset by timepoints, and selecting HVG per timepoint
-# 3. Running consensus NMF (cNMF) per timepoint
+# # Downloading, pre-processing and running cNMF on Zepp et. al 2021 data
+# 1. Obtaining the AnnData object and complementary metadata
+#
+# 2. filtering genes, selecting joint highly variable genes (HVGs) and showing key statistics
+# 3. Splitting the dataset by developmental stage, and selecting HVG per stage
+# 3. Running consensus NMF (cNMF) per stage
 # 4. Selecting parameters for the cNMF 
 #
 #
@@ -34,10 +35,10 @@ from importlib import reload
 
 import sys
 import os
-from urllib.request import urlretrieve
 
 import numpy as np
 import pandas as pd
+from scipy import sparse
 import scanpy as sc
 import matplotlib.pyplot as plt
 
@@ -47,94 +48,86 @@ from gepdynamics import cnmf
 
 _utils.cd_proj_home()
 print(os.getcwd())
-
+# os.chdir('/cs/labs/mornitzan/yotamcon/gep-dynamics')
 
 
 # %% [markdown]
-# ### Downloading or loading AnnData object
+# ### Downloading and loading AnnData object
+# The adata contains log1p(CP10K) data, so we keep the transformed data in `raw`, and add the original counts as `X`
+
+# %%
+results_dir = _utils.set_dir('results_zepp')
+data_dir = _utils.set_dir('data')
+GSE_dir = _utils.set_dir(data_dir.joinpath('GSE149563'))
+
+
+# %% magic_args="--no-raise-error false # remove this to run the downloading" language="script"
+#
+# # Adata downloaded from https://data-browser.lungmap.net/explore/projects/00f056f2-73ff-43ac-97ff-69ca10e38c89/get-curl-command
+# # by running this for the adata: 
+# !(cd {GSE_dir.as_posix()} && curl --location --fail 'https://service.azul.data.humancellatlas.org/manifest/files?catalog=lm3&format=curl&filters=%7B%22fileFormat%22%3A+%7B%22is%22%3A+%5B%22h5ad%22%5D%7D%2C+%22projectId%22%3A+%7B%22is%22%3A+%5B%2200f056f2-73ff-43ac-97ff-69ca10e38c89%22%5D%7D%2C+%22genusSpecies%22%3A+%7B%22is%22%3A+%5B%22Mus+musculus%22%5D%7D%7D&objectKey=manifests%2Fe42d976a-5137-5422-be32-39008e1d53d7.1ad7b2a4-0d0f-55d3-9d0c-6c37e8d46dc8.curlrc' | curl --config - )
+# # and then running this for the metadata: 
+# !(cd {GSE_dir.as_posix()} && curl --location --fail 'https://service.azul.data.humancellatlas.org/manifest/files?catalog=lm3&format=curl&filters=%7B%22fileFormat%22%3A+%7B%22is%22%3A+%5B%22csv%22%5D%7D%2C+%22projectId%22%3A+%7B%22is%22%3A+%5B%2200f056f2-73ff-43ac-97ff-69ca10e38c89%22%5D%7D%2C+%22genusSpecies%22%3A+%7B%22is%22%3A+%5B%22Mus+musculus%22%5D%7D%7D&objectKey=manifests%2Fed538a08-689b-530d-a661-e1756132b883.1ad7b2a4-0d0f-55d3-9d0c-6c37e8d46dc8.curlrc' | curl --config -)
+#
+# download_dir = GSE_dir.joinpath('a078a6cb-a72a-305c-80df-cf35aedd01ff')
+# ! mv {download_dir.as_posix()}/* {GSE_dir.as_posix()}
+# ! rmdir {download_dir.as_posix()}
 
 # %%
 # %%time
-results_dir = _utils.set_dir('results')
-orig_adata_path = results_dir.joinpath('marjanovic_mmLungPlate.h5ad')
 
-if not orig_adata_path.exists():  # create the original adata if it doesn't exist
-    # directories for file download:
-    data_dir = _utils.set_dir('data')
-    GSE_dir = _utils.set_dir(data_dir.joinpath('GSE154989'))
-    
-    # GEO server prefix for mmLungPlate SubSeries GSE154989
-    ftp_address = 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE154nnn/GSE154989/suppl/'
+# %time adata = sc.read(GSE_dir.joinpath('JZ_Mouse_TimeSeries.h5ad'))
+metadata = pd.read_csv(GSE_dir.joinpath('AllTimePoints_metadata.csv'), index_col=0)
 
-    #filenames
-    f_rawCount = GSE_dir.joinpath('GSE154989_mmLungPlate_fQC_dSp_rawCountOrig.h5')
-    f_geneTable = GSE_dir.joinpath('GSE154989_mmLungPlate_fQC_geneTable.csv.gz')
-    f_smpTable = GSE_dir.joinpath('GSE154989_mmLungPlate_fQC_smpTable.csv.gz')
-    f_smp_annot = GSE_dir.joinpath('GSE154989_mmLungPlate_fQC_dZ_annot_smpTable.csv.gz')
+adata.obs['celltype'] = metadata.var_celltype
+adata.obs['compartment'] = metadata.var_compartment
 
-    ftp_address = 'https://ftp.ncbi.nlm.nih.gov/geo/series/GSE154nnn/GSE154989/suppl/'
-
-    # downloading if needed:
-    if not f_rawCount.exists():
-        urlretrieve(ftp_address + f_rawCount.name, f_rawCount)
-    
-    if not f_geneTable.exists():
-        urlretrieve(ftp_address + f_geneTable.name, f_geneTable)
-    
-    if not f_smpTable.exists():
-        urlretrieve(ftp_address + f_smpTable.name, f_smpTable)
-    
-    if not f_smp_annot.exists():
-        urlretrieve(ftp_address + f_smp_annot.name, f_smp_annot)
-    
-    # reading the files
-    sparse_counts = _utils.read_matlab_h5_sparse(f_rawCount)
-    
-    gene_ids = pd.read_csv(f_geneTable, index_col=0)
-    smp_ids = pd.read_csv(f_smpTable, index_col=0)
-    smp_annotation = pd.read_csv(f_smp_annot, index_col=0)
-    
-    # constructing the adata
-    adata = sc.AnnData(X=sparse_counts, dtype=np.float32, var=gene_ids, obs=smp_ids)
-    
-    adata.obs['clusterK12'] = smp_annotation.clusterK12.astype('category')
-    
-    adata.obsm['X_tsne'] = smp_annotation[['tSNE_1', 'tSNE_2']].values
-    adata.obsm['X_phate'] = smp_annotation[['phate_1', 'phate_2']].values
-    adata.write(orig_adata_path)
-else:
-    adata = sc.read(orig_adata_path)
-
+adata.raw = adata
+adata.X = (sparse.csc_matrix(adata.obs.n_molecules.values[:, None] / 10_000).multiply(adata.X.expm1())).rint()
 adata
-# adata_norm_depth = sc.read(data_dir.joinpath('marjanovic_mmLungPlate_depth_normalized.h5ad'))
-
 
 
 # %%
-sc.external.pl.phate(adata, color=['timesimple', 'clusterK12'])
-adata.uns['timesimple_colors_dict'] = dict(zip(adata.obs['timesimple'].cat.categories, adata.uns['timesimple_colors']))
-adata.uns['clusterK12_colors_dict'] = dict(zip(adata.obs['clusterK12'].cat.categories, adata.uns['clusterK12_colors']))
+adata.obs.development_stage = adata.obs.development_stage.cat.rename_categories(
+    {'Adult': 'P42', 'E12.5': 'E12', 'E15.5': 'E15', 'E17.5': 'E17'}).cat.reorder_categories(
+    ['E12', 'E15', 'E17', 'P3', 'P7', 'P15', 'P42'])
 
 # %%
-pd.crosstab(adata.obs.timesimple, adata.obs.clusterK12)
+sc.pl.umap(adata, color=['development_stage', 'compartment'])
+sc.pl.umap(adata, color=['celltype'])
+
+adata.uns['development_stage_colors_dict'] = dict(zip(adata.obs['development_stage'].cat.categories, adata.uns['development_stage_colors']))
+adata.uns['compartment_colors_dict'] = dict(zip(adata.obs['compartment'].cat.categories, adata.uns['compartment_colors']))
+adata.uns['celltype_colors_dict'] = dict(zip(adata.obs['celltype'].cat.categories, adata.uns['celltype_colors']))
+
+# %%
+pd.crosstab(adata.obs.development_stage, adata.obs.compartment)
+
+# %%
+pd.crosstab(adata.obs.celltype, adata.obs.development_stage)
+
+# %%
+pd.crosstab(adata.obs.celltype, adata.obs.compartment)
 
 # %% [markdown]
 # ### Filter genes and plot basic statistics
 
 # %%
-# # filtering genes with very low abundance
-# sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 1000))
-# sc.pp.filter_genes(adata, min_counts=40)
-#
-# # getting general statistics for counts abundance
-# sc.pp.filter_cells(adata, min_counts=0)
-# sc.pp.filter_cells(adata, min_genes=0)
-#
-# sc.pp.highly_variable_genes(adata, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
-# adata
+# %%time
+
+# filtering genes with very low abundance
+sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 1000))
+
+# getting general statistics for counts abundance
+sc.pp.filter_genes(adata, min_counts=0)
+sc.pp.filter_cells(adata, min_counts=0)
+sc.pp.filter_cells(adata, min_genes=0)
+
+sc.pp.highly_variable_genes(adata, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
+adata
 
 # %%
-column_of_interest = 'timesimple'
+column_of_interest = 'development_stage'
 
 stats_df = adata.obs.loc[:, [column_of_interest, 'n_genes', 'n_counts']].groupby(
     [column_of_interest]).median()
@@ -143,25 +136,26 @@ stats_df = pd.concat([adata.obs.groupby([column_of_interest]).count().iloc[:, 0]
                       stats_df], axis=1)
 stats_df.columns = ['# cells', 'median # genes', 'median # counts']
 
-stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, ylim=((1e2, 2e6)))
+stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, ylim=((5e2, 2e5)))
 plt.show()
 del column_of_interest, stats_df
 
 # %% [markdown]
-# ### Splitting the adata by "timesimple", and creating a normalized variance layer
+# ### Splitting the adata by "development_stage", and creating a normalized variance layer
 
 # %%
 # %%time
 
-times = adata.obs.timesimple.cat.categories
-split_adatas_dir = _utils.set_dir(results_dir.joinpath('marjanovic_mmLungPlate_split'))
+stages = adata.obs.development_stage.cat.categories
+split_adatas_dir = _utils.set_dir(results_dir.joinpath('split_adatas'))
 
-for time in times:
-    if not split_adatas_dir.joinpath(f'{time}.h5ad').exists():
-        tmp = adata[adata.obs.timesimple == time].copy()
+for stage in stages:
+    print(f'working on stage {stage}')
+    if not split_adatas_dir.joinpath(f'{stage}.h5ad').exists():
+        tmp = adata[adata.obs.development_stage == stage].copy()
 
-        tmp.uns['name'] = f'{time}'   # full name
-        tmp.uns['sname'] = f't{time[:2]}'  # short name
+        tmp.uns['name'] = f'{stage}'   # full name
+        tmp.uns['sname'] = f'{stage}'  # short name, here it is the same
 
         # correcting the gene counts
         sc.pp.filter_genes(tmp, min_cells=0)
@@ -170,7 +164,7 @@ for time in times:
         # calculating per sample HVGs
         sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
 
-        tmp.write_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
+        tmp.write_h5ad(split_adatas_dir.joinpath(f'{stage}.h5ad'))
 
         del tmp
 
@@ -183,100 +177,137 @@ for time in times:
 
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 
-ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+ks = [22, 23, 24, 25, 26, 27, 28, 29, 30]#[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 
-for time in times:
-    print(f'Starting on {time}')
-    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
+for stage in stages:
+    print(f'Starting on {stage}')
+    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}.h5ad'))
     
-    c_object = cnmf.cNMF(cnmf_dir, time)
+    c_object = cnmf.cNMF(cnmf_dir, stage)
     
     # Variance normalized version of the data
-    X = sc.pp.scale(tmp.X[:, tmp.var.highly_variable].toarray(), zero_center=False)
+    X = sc.pp.scale(tmp.X[:, tmp.var.highly_variable].toarray().astype(np.float32), zero_center=False)
     
-    c_object.prepare(X, ks, n_iter=200, new_nmf_kwargs={'tol': _constants.NMF_TOLERANCE})
+    c_object.prepare(X, ks, n_iter=100, new_nmf_kwargs={'tol': _constants.NMF_TOLERANCE,
+                                                        'beta_loss': 'kullback-leibler'})
     
     c_object.factorize(0, 1, gpu=True)
     
-    c_object.combine()
+    # c_object.combine()
     
     del tmp, X
+    
 
 
 # %%
-for time in times:
-    print(f'Starting on {time}')
-    c_object = cnmf.cNMF(cnmf_dir, time)
+# %%time
+for stage in stages:
+    print(f'Starting on {stage}')
+    c_object = cnmf.cNMF(cnmf_dir, stage)
     for thresh in [0.5, 0.4, 0.3]:
+        print(f'working on threshold {thresh}')
         c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
-                                  close_fig=True, show_clustering=True)
+                                  close_fig=True, show_clustering=True, gpu=True)
+    
+
+
+# %%
+stage = 'P3'
+thresh = 0.45
+print(f'Starting on {stage}')
+c_object = cnmf.cNMF(cnmf_dir, stage)
+print(f'working on threshold {thresh}')
+c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
+                          close_fig=True, show_clustering=True, gpu=True)
 
 
 # %% [markdown]
 # ### Selecting the decomposition rank utilizing K-selection plots and PCA variance explained
 
 # %%
-n_components = 14
+# %%time
+df_var = pd.DataFrame()
+df_cumulative_var = pd.DataFrame()
 
-for time in times:
+n_components = 50
+
+for stage in stages:
     
-    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
+    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}.h5ad'))
     
     a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.highly_variable], n_comps=n_components, return_info=True)
-    print(f'{time} - cummulative variance percentages:'),
-    for i in range(n_components):
-        print(f'{c[i]*100: .2f}', end='\t')
-    print()
-    for i in range(n_components):
-        print(f'{c.cumsum()[i]*100: .2f}', end='\t')
-    print()
+
+    df_var[f'{stage}'] = c*100
+    df_cumulative_var[f'{stage}'] = c.cumsum()*100
+    
+#     print(f'{stage} - cummulative variance percentages:'),
+#     for i in range(n_components):
+#         print(f'{c[i]*100: .2f}', end='\t')
+#     print()
+#     for i in range(n_components):
+#         print(f'{c.cumsum()[i]*100: .2f}', end='\t')
+#     print()
 
 # %%
-# # %%time
+plt.plot(range(50), df_var, label=df_var.columns)
+plt.title('Variance explained')
+plt.legend()
+plt.yscale('log')
+plt.show()
 
-# selected_cnmf_params = {
-#     '01_T_early_ND': (2, 0.5),  # rank 3 has slightly better loss, but is much more unstable
-#     '02_KorKP_early_ND': (5, 0.5),  # could have chosen 4 as well
-#     '04_K_12w_ND': (6, 0.4),    # Program 6 isn't very stable, need to be careful with it
-#     '05_K_30w_ND': (8, 0.4),    # rank 8,0.3 better loss, but was less stable, 5 had similar loss with same stability
-#     '06_KP_12w_ND': (7, 0.4),   # there are four programs that seem very stable among the 4+ ranks
-#     '07_KP_20w_ND': (10, 0.5),  # Ranks 8, 9 also look very good
-#     '08_KP_30w_ND': (8, 0.5)}   # Ranks 11+ had better loss but were less stable, and their last programs where garbage
+# %%
+plt.plot(df_cumulative_var.index, 100-df_cumulative_var, label=df_var.columns)
+plt.yscale('log')
+plt.title(f' 1- CDF variance explained')
+plt.legend()
+plt.show()
 
-# split_adatas = {}
+# %%
+# %%time
 
-# for time, (k, threshold) in selected_cnmf_params.items():
-#     print(f'Working on {time} with k={k} and threshold={threshold}')
-#     tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
+selected_cnmf_params = {
+    'E12': (16, 0.4),  # 
+    'E15': (18, 0.4),  # 
+    'E17': (15, 0.4),    # 
+    'P3': (16, 0.5),    # rank 16 has a split that improves loss and stability
+    'P7': (18, 0.4),   # 
+    'P15': (13, 0.4),  # 
+    'P42': (13, 0.4)}   # 
 
-#     c_object = cnmf.cNMF(cnmf_dir, time)
-#     c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
-#                        nmf_refitting_iters=1000, show_clustering=False)
+split_adatas = {}
 
-#     usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+for stage, (k, threshold) in selected_cnmf_params.items():
+    print(f'Working on {stage} with k={k} and threshold={threshold}')
+    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}.h5ad'))
 
-#     tmp.uns['cnmf_params'] = {'k_nmf': k, 'threshold': threshold}
+    c_object = cnmf.cNMF(cnmf_dir, stage)
+    c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                       nmf_refitting_iters=1000, show_clustering=False)
 
-#     tmp.obsm['usages'] = usages.copy()
+    usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
 
-#     usages_norm = usages / np.sum(usages, axis=1, keepdims=True)
-#     tmp.obsm['usages_norm'] = usages_norm
+    tmp.uns['cnmf_params'] = {'k_nmf': k, 'threshold': threshold}
 
-#     # get per gene z-score of data after TPM normalization and log1p transformation 
-#     tpm_log1p_zscore = tmp.X.toarray()
-#     tpm_log1p_zscore /= 1e-6 * np.sum(tpm_log1p_zscore, axis=1, keepdims=True)
-#     tpm_log1p_zscore = np.log1p(tpm_log1p_zscore)
-#     tpm_log1p_zscore = sc.pp.scale(tpm_log1p_zscore)
+    tmp.obsm['usages'] = usages.copy()
 
-#     usage_coefs = _utils.fastols(usages_norm, tpm_log1p_zscore)
+    usages_norm = usages / np.sum(usages, axis=1, keepdims=True)
+    tmp.obsm['usages_norm'] = usages_norm
 
-#     tmp.varm['usage_coefs'] = pd.DataFrame(
-#         usage_coefs.T, index=tmp.var.index,
-#         columns=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
+    # get per gene z-score of data after TPM normalization and log1p transformation 
+    tpm_log1p_zscore = tmp.X.toarray()
+    tpm_log1p_zscore /= 1e-6 * np.sum(tpm_log1p_zscore, axis=1, keepdims=True)
+    tpm_log1p_zscore = np.log1p(tpm_log1p_zscore)
+    tpm_log1p_zscore = sc.pp.scale(tpm_log1p_zscore)
+
+    usage_coefs = _utils.fastols(usages_norm, tpm_log1p_zscore)
+
+    tmp.varm['usage_coefs'] = pd.DataFrame(
+        usage_coefs.T, index=tmp.var.index,
+        columns=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
     
-#     split_adatas[time] = tmp
+    split_adatas[stage] = tmp
 
-#     tmp.write_h5ad(split_adatas_dir.joinpath(f'{time}_GEPs.h5ad'))
+    tmp.write_h5ad(split_adatas_dir.joinpath(f'{stage}_GEPs.h5ad'))
 
 
 # %% Loading GEPs adatas

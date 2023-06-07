@@ -33,8 +33,9 @@ import scanpy as sc
 from gepdynamics import _utils
 
 
+# Move to the project's home directory, as defined in _constants
+_utils.cd_proj_home()
 print(os.getcwd())
-os.chdir('/cs/labs/mornitzan/yotamcon/gep-dynamics')
 
 
 # %%
