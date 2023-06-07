@@ -342,7 +342,8 @@ class Comparator(object):
         """
         String representation of the Comparator object.
         """
-        return f'Comparator(adata_a={self.a_sname}, adata_b={self.b_sname}) at stage {self.stage}'
+        return f'Comparator(adata_a={self.a_sname}, adata_b={self.b_sname}) at' \
+               f' stage {self.stage}. engine={self.nmf_engine}.'
 
 
     def save_to_file(self, filename: _utils.PathLike):
@@ -458,6 +459,8 @@ class Comparator(object):
         if self.verbosity > 0:
             print(f'Extracting A GEPs on jointly highly variable genes')
         if self.nmf_engine in (NMFEngine.torchnmf, NMFEngine.consensus_torch):
+            if self.device is None:
+                self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
             W, H, n_iter = cnmf.nmf_torch(X_a.T, nmf_kwargs, device=self.device, verbose=(self.verbosity > 1))
         else:
             W, H, n_iter = sknmf.non_negative_factorization(X_a.T, **nmf_kwargs, verbose=(self.verbosity > 1))
@@ -557,6 +560,8 @@ class Comparator(object):
                     import torch
                 except ImportError:
                     raise ImportError("torch module is not installed. To use torchnmf engine please install torch.")
+            if self.device is None:
+                self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             tens = torch.tensor(X_b).to(self.device)
 
             if self.verbosity > 0:
