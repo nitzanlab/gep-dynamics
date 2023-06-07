@@ -378,6 +378,40 @@ def _create_usages_norm_adata(adata):
             var=var.copy(), uns=deepcopy(adata.uns), obsm=deepcopy(adata.obsm))
 
 
+def get_single_row_color_from_adata(adata: sc.AnnData, col_index: int = -1):
+    """
+    Assuming the AnnData object has a "row_color" attribute in obsm,
+    return a color for each row using the column index
+
+    """
+    if 'row_colors' not in adata.obsm_keys():
+        return None
+
+    if len(adata.obsm['row_colors'].shape) == 1:
+        return adata.obsm['row_colors']
+    elif isinstance(adata.obsm['row_colors'], pd.DataFrame):
+        return adata.obsm['row_colors'].iloc[:, col_index]
+    else:
+        return adata.obsm['row_colors'][:, col_index]
+
+
+def expand_adata_row_colors(adata: sc.AnnData, new_color_column):
+    """
+    For a given AnnData object, add a new color column to existing row colors
+    If the object does not have row colors, return the new color column
+    If the object has row colors, return the new color column appended to the existing row colors
+    """
+    if 'row_colors' not in adata.obsm_keys():
+        return new_color_column
+    elif isinstance(adata.obsm['row_colors'], pd.core.base.PandasObject):
+        df = pd.concat([pd.DataFrame(adata.obsm['row_colors']).reset_index(drop=True),
+                          pd.DataFrame(new_color_column).reset_index(drop=True)],
+                         axis=1)
+        return df.set_index(adata.obs_names)
+    else:
+        raise ValueError("Unsupported row colors type")
+
+
 def plot_usages_norm_violin(
         adata: sc.AnnData,
         group_by_key: str,  # obs key

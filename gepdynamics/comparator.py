@@ -199,24 +199,32 @@ class NMFResultBase(object):
         """
         if saving_folder is None and save:
             raise ValueError('saving_folder must be specified if save=True')
-
-        dec_folder = _utils.set_dir(saving_folder)
+        elif not save:
+            file_genes = None
+            file_usage = None
+        else:
+            dec_folder = _utils.set_dir(saving_folder)
+            file_genes = dec_folder.joinpath(f'{self.name}_correlations_gene_coefficients.png')
+            file_usage = dec_folder.joinpath(f'{self.name}_correlations_usages.png')
 
         # parameters for genes heatmap
         df_genes = pd.DataFrame(_utils.truncated_spearmans_correlation(
             self.gene_coefs, truncation_level=tsc_truncation_level, rowvar=False),
             index=self.prog_names, columns=self.prog_names)
         title_genes = f'{self.name} gene coefficients truncated spearman correlation'
-        file_genes = dec_folder.joinpath(f'{self.name}_correlations_gene_coefficients.png')
 
         # parameters for usages heatmap
         df_usages = pd.DataFrame(np.corrcoef(self.norm_usages, rowvar=False),
                           index=self.prog_names, columns=self.prog_names)
         title_usage = f'{self.name} usages correlation'
-        file_usage = dec_folder.joinpath(f'{self.name}_correlations_usages.png')
 
         for df, title, file in [(df_genes, title_genes, file_genes), (df_usages, title_usage, file_usage)]:
-            sns.heatmap(df, cmap='RdYlGn', annot=True, fmt='.2f', vmin=0, vmax=1, square=True)
+            g = sns.heatmap(df, cmap='RdYlGn', annot=True, fmt='.2f', vmin=0,
+                            vmax=1, square=True, cbar_kws={"shrink": (1 - 0.01*self.rank)})
+            g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right')
+            g.set_yticklabels(g.get_yticklabels(), rotation=0, horizontalalignment='right')
+            g.figure.set_figwidth(5 + 0.4 * self.rank)
+            g.figure.set_figheight(4 + 0.4 * self.rank)
             plt.title(title)
             plt.tight_layout()
 
@@ -494,12 +502,9 @@ class Comparator(object):
         title = f"{self.a_sname} normalized usages of " \
                 f"original GEPs, k={res.rank}"
 
-        row_colors = pd.concat([
-            pd.Series(self.adata_a.obsm.get('row_colors'),
-                      name='cluster', index=self.adata_a.obs.index),
-            pd.Series(_utils.floats_to_colors(res.loss_per_cell,
-                                              cmap='RdYlGn_r', vmax=1200),
-                      name='residual', index=self.adata_a.obs.index)], axis=1)
+        row_colors = _utils.expand_adata_row_colors(self.adata_a, pd.Series(
+            _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=1200),
+            name='residual', index=self.adata_a.obs.index))
 
         un_sns = _utils.plot_usages_norm_clustermaps(
             self.adata_a, normalized_usages=res.norm_usages,
@@ -794,12 +799,9 @@ class Comparator(object):
                         f"{self.a_sname} GEPs + " \
                         f"{res.rank - self.rank_a} novel GEPs"
 
-            row_colors = pd.concat([
-                pd.Series(self.adata_b.obsm.get('row_colors'),
-                          name='cluster', index=self.adata_b.obs.index),
-                pd.Series(_utils.floats_to_colors(res.loss_per_cell,
-                                                  cmap='RdYlGn_r', vmax=1200),
-                          name='residual', index=self.adata_b.obs.index)], axis=1)
+            row_colors = _utils.expand_adata_row_colors(self.adata_b, pd.Series(
+                _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=1200),
+                name='residual', index=self.adata_a.obs.index))
 
             un_sns = _utils.plot_usages_norm_clustermaps(
                 self.adata_b, normalized_usages=res.norm_usages,
@@ -841,7 +843,7 @@ class Comparator(object):
 
             plt.plot([0, max_cell_loss], [0, max_cell_loss], 'k-')
             plt.scatter(dn_res.loss_per_cell, pf_res.loss_per_cell, s=2,
-                        c=self.adata_b.obsm.get('row_colors'))
+                        c=_utils.get_single_row_color_from_adata(self.adata_b))
             plt.xlabel(f'{dn_res.name} loss per cell')
             plt.ylabel(f'{pf_res.name} loss per cell')
             plt.title('Comparison of loss per cell using two decompositions')
