@@ -499,7 +499,7 @@ def plot_usages_norm_clustermaps(
     un_sns.fig.suptitle(title, size=30, ha='center', y=1.05)
 
     if show:
-        un_sns.fig.show()
+        plt.show() # un_sns.fig.show()
 
     plt.close()
 
