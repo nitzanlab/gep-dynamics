@@ -825,7 +825,7 @@ class Comparator(object):
 
             row_colors = _utils.expand_adata_row_colors(self.adata_b, pd.Series(
                 _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=1200),
-                name='residual', index=self.adata_a.obs.index))
+                name='residual', index=self.adata_b.obs.index))
 
             un_sns = _utils.plot_usages_norm_clustermaps(
                 self.adata_b, normalized_usages=res.norm_usages,
