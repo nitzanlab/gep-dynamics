@@ -318,12 +318,13 @@ class Comparator(object):
         self.b_sname = self.adata_b.uns['sname']
 
         self.results_dir = _utils.set_dir(results_dir)
+        self.verbosity = verbosity
         self.beta_loss = beta_loss
         self.max_nmf_iter = max_nmf_iter
+        self.max_added_rank = max_added_rank
+
         self.nmf_engine = nmf_engine
         self.device = device
-        self.max_added_rank = max_added_rank
-        self.verbosity = verbosity
 
         # Fields to be filled in later
         self.joint_hvgs = None
@@ -337,6 +338,26 @@ class Comparator(object):
         self.fingerprints = [None] * self.rank_a
 
         self.stage = Stage.INITIALIZED
+
+    def _set_torch_device(self):
+        """
+        Set the torch device to use for torch-based NMF engine. return the device.
+
+        """
+        if 'torch' not in dir():
+            try:
+                import torch
+            except ImportError:
+                raise ImportError("torch module is not installed. To use torchnmf engine please install torch.")
+
+        if isinstance(self.device, torch.device):
+            pass
+        elif self.device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            print('No torch device was specified, using', self.device)
+        else:
+            torch.device(self.device)
+        return self.device
 
     def __repr__(self):
         """
@@ -459,9 +480,9 @@ class Comparator(object):
         if self.verbosity > 0:
             print(f'Extracting A GEPs on jointly highly variable genes')
         if self.nmf_engine in (NMFEngine.torchnmf, NMFEngine.consensus_torch):
-            if self.device is None:
-                self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            W, H, n_iter = cnmf.nmf_torch(X_a.T, nmf_kwargs, device=self.device, verbose=(self.verbosity > 1))
+            W, H, n_iter = cnmf.nmf_torch(
+                X_a.T, nmf_kwargs, device=self._set_torch_device(),
+                verbose=(self.verbosity > 1))
         else:
             W, H, n_iter = sknmf.non_negative_factorization(X_a.T, **nmf_kwargs, verbose=(self.verbosity > 1))
 
@@ -538,7 +559,7 @@ class Comparator(object):
         ----------
 
         # TODO: add normalization option
-        # TODO: add support for repeats > 1 in de-novo and fnmf
+        # TODO: add support for repeats > 1 in de-novo and fnmf (requires random initialization
         """
         if self.stage == Stage.INITIALIZED:
             self.extract_geps_on_jointly_hvgs()
@@ -560,9 +581,7 @@ class Comparator(object):
                     import torch
                 except ImportError:
                     raise ImportError("torch module is not installed. To use torchnmf engine please install torch.")
-            if self.device is None:
-                self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            tens = torch.tensor(X_b).to(self.device)
+            tens = torch.tensor(X_b).to(self._set_torch_device())
 
             if self.verbosity > 0:
                 print('Decomposing B using A GEPs and no additional GEPs')
