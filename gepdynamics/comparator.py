@@ -924,12 +924,28 @@ class Comparator(object):
                 plt.show()
             plt.close()
 
-    def run_gsea(self, n_top_genes: int = 1000, gprofiler_kwargs: Dict[str, Any] = None):
+    def run_gsea(self, n_top_genes: int = 1000, gprofiler_kwargs: Dict[str, Any] = None,
+                 gene_ids_column_number: int = 0):
         """
         Run gene set enrichment analysis on all the decomposed GEPs
+
+        Parameters:
+        ----------
+        n_top_genes : int, optional
+            Number of top-ranked genes to consider for ranked GSEA (default is 1000).
+        gprofiler_kwargs : Dict[str, Any], optional
+            Additional keyword arguments to be passed to `MyGProfiler` class (default is None).
+        gene_ids_column_number : int, optional
+            Column number in `adata_a.var` representing gene IDs (default is 0).
+
+        Returns:
+        --------
+        None
         """
         if self.stage in (Stage.INITIALIZED, Stage.PREPARED):
             raise RuntimeError('Must decompose before running GSEA on decompositions')
+
+        gene_IDs_column_name = self.adata_a.var.columns[gene_ids_column_number]
 
         programs_top_genes_dir = _utils.set_dir(self.results_dir.joinpath('programs_top_genes'))
         for res in [self.a_result, *self._all_results]:
@@ -941,21 +957,48 @@ class Comparator(object):
         gp = _utils.MyGProfiler(**gprofiler_kwargs)
 
         # GSEA on A decomposition GEPs
-        geneID_gt_2 = sc.pp.filter_genes(self.adata_a.X, min_cells=2)[0]
-        background_geneSymbol = self.adata_a.var.loc[geneID_gt_2, 'geneSymbol'].to_list()
+        var_names_gt_2 = sc.pp.filter_genes(self.adata_a.X, min_cells=2)[0]
+        background_gene_ids = self.adata_a.var.loc[var_names_gt_2, gene_IDs_column_name].to_list()
 
-        self._run_gsea_on_nmf_result(self.a_result, background_geneSymbol, gp, self.adata_b.var, n_top_genes)
+        self._run_gsea_on_nmf_result(
+            self.a_result, background_gene_ids, gp, self.adata_a.var,
+            n_top_genes, gene_IDs_column_name)
 
         # GSEA onB decompositions GEPs
-        geneID_gt_2 = sc.pp.filter_genes(self.adata_b.X, min_cells=2)[0]
-        background_geneSymbol = self.adata_b.var.loc[geneID_gt_2, 'geneSymbol'].to_list()
+        var_names_gt_2 = sc.pp.filter_genes(self.adata_b.X, min_cells=2)[0]
+        background_gene_ids = self.adata_b.var.loc[var_names_gt_2, gene_IDs_column_name].to_list()
 
         for res in self._all_results:
-            self._run_gsea_on_nmf_result(res, background_geneSymbol, gp, self.adata_b.var, n_top_genes)
+            self._run_gsea_on_nmf_result(
+                res, background_gene_ids, gp, self.adata_b.var,
+                n_top_genes, gene_IDs_column_name)
 
     def _run_gsea_on_nmf_result(
-            self, res: NMFResultBase, background_geneSymbol: List[str],
-            gp: _utils.MyGProfiler, adata_var: pd.DataFrame, n_top_genes: int = 1000):
+            self, res: NMFResultBase, background_gene_ids: List[str],
+            gp: _utils.MyGProfiler, adata_var: pd.DataFrame, n_top_genes: int = 1000,
+            gene_ids_column_name: str = 'name'):
+        """
+        Run gene set enrichment analysis on a specific NMF result.
+
+        Parameters:
+        ----------
+        res : NMFResultBase
+            NMF result on which to perform GSEA.
+        background_gene_ids : List[str]
+            List of background gene IDs for enrichment analysis.
+        gp : _utils.MyGProfiler
+            Instance of `MyGProfiler` class for GSEA.
+        adata_var : pd.DataFrame
+            AnnData object var attribute.
+        n_top_genes : int, optional
+            Number of top-ranked genes to consider for ranked GSEA (default is 1000).
+        gene_ids_column_name : str, optional
+            Column name in `adata_var` representing gene IDs (default is 'name').
+
+        Returns:
+        --------
+        None
+        """
         if self.verbosity > 1:
             print(f'Running gene set enrichment analysis on {res.name} decomposition GEPs')
 
@@ -964,12 +1007,12 @@ class Comparator(object):
         res.gsea_results = [None] * res.rank
 
         for index in range(res.rank):
-            ordered_genesID = res.gene_coefs.nlargest(
+            ordered_var_names = res.gene_coefs.nlargest(
                 columns=[res.prog_names[index]], n=n_top_genes).index
-            ordered_genesSymbol = adata_var.loc[ordered_genesID, 'geneSymbol'].to_list()
+            ordered_genesSymbol = adata_var.loc[ordered_var_names, gene_ids_column_name].to_list()
 
             res.gsea_results[index] = gp.profile(
-                ordered_genesSymbol, ordered=True, background=background_geneSymbol)
+                ordered_genesSymbol, ordered=True, background=background_gene_ids)
 
             res.gsea_results[index].to_csv(
                 gsea_dir.joinpath(f"{res.prog_names[index]}.csv"))
