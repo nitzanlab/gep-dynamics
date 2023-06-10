@@ -530,9 +530,11 @@ class Comparator(object):
             _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=1200),
             name='residual', index=self.adata_a.obs.index))
 
+        col_labels = res.prog_labels_2l if res.rank < 20 else res.prog_labels_1l
+
         un_sns = _utils.plot_usages_norm_clustermaps(
             self.adata_a, normalized_usages=res.norm_usages,
-            columns=res.prog_labels_2l, title=title, show=show,
+            columns=col_labels, title=title, show=show,
             sns_clustermap_params={'row_colors': row_colors})
 
         if save:
@@ -827,9 +829,11 @@ class Comparator(object):
                 _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=1200),
                 name='residual', index=self.adata_b.obs.index))
 
+            col_labels = res.prog_labels_2l if res.rank < 20 else res.prog_labels_1l
+
             un_sns = _utils.plot_usages_norm_clustermaps(
                 self.adata_b, normalized_usages=res.norm_usages,
-                columns=res.prog_labels_2l, title=title, show=show,
+                columns=col_labels, title=title, show=show,
                 sns_clustermap_params={'row_colors': row_colors})
 
             if save:
@@ -853,7 +857,10 @@ class Comparator(object):
                     f"GEPs and {self.a_sname} GEPs + {pf_res.rank - self.rank_a} novel GEPs"
 
             joint_usages = np.concatenate([dn_res.norm_usages, pf_res.norm_usages], axis=1)
-            joint_labels = dn_res.prog_labels_2l + pf_res.prog_labels_2l
+            if dn_res.rank < 10:
+                joint_labels = dn_res.prog_labels_2l + pf_res.prog_labels_2l
+            else:
+                joint_labels = dn_res.prog_labels_1l + pf_res.prog_labels_1l
             joint_colors = ['#2ca02c'] * dn_res.rank + ['#d62728'] * pf_res.rank
 
             un_sns = _utils.plot_usages_norm_clustermaps(
