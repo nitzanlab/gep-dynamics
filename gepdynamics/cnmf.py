@@ -865,10 +865,10 @@ class cNMF():
             hist_ax = fig.add_subplot(
                 hist_gs[0, 0], xscale='linear', yscale='linear', xlabel='',
                 ylabel='', frameon=True, title='Local density histogram')
-            hist_ax.hist(local_density.values, bins=np.linspace(0, 1, 51))
+            hist_ax.hist(local_density.values, bins=np.linspace(0, 1.42, 72))
             hist_ax.yaxis.tick_right()
-    
-            hist_ax.set_xlim((-0.025, 1.025))
+
+            hist_ax.set_xlim((-0.005, 1.435))
             xlim = hist_ax.get_xlim()
         
             ylim = hist_ax.get_ylim()

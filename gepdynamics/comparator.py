@@ -445,10 +445,12 @@ class Comparator(object):
 
     def _normalize_adata_for_decomposition(self, adata: sc.AnnData, method='variance') -> sc.AnnData:
         """
-        Normalize adata for decomposition
+        Normalize adata for decomposition, fit the type to the usages matrix type.
         """
         if method == 'variance':
-            return sc.pp.scale(adata[:, self.joint_hvgs].X.toarray(), zero_center=False)
+            normalized = sc.pp.scale(adata[:, self.joint_hvgs].X.toarray(), zero_center=False)
+
+        return normalized.astype(self.usages_matrix_a.dtype)
 
     def extract_geps_on_jointly_hvgs(self, min_cells_per_gene: int = 5):
         """
@@ -853,6 +855,7 @@ class Comparator(object):
         comp_folder = _utils.set_dir(self.results_dir.joinpath('comparisons'))
 
         for dn_res, pf_res in zip(self.denovo_results, [self.fnmf_result, *self.pfnmf_results]):
+            # usages clustermap
             title = f"{self.b_sname} normalized usages of de-novo " \
                     f"GEPs and {self.a_sname} GEPs + {pf_res.rank - self.rank_a} novel GEPs"
 
@@ -872,12 +875,19 @@ class Comparator(object):
 
             plt.close()
 
+            # loss per cell scatter
             plt.plot([0, max_cell_loss], [0, max_cell_loss], 'k-')
             plt.scatter(dn_res.loss_per_cell, pf_res.loss_per_cell, s=2,
                         c=_utils.get_single_row_color_from_adata(self.adata_b))
+
             plt.xlabel(f'{dn_res.name} loss per cell')
+            plt.xlim((0, max_cell_loss*2))
+
             plt.ylabel(f'{pf_res.name} loss per cell')
+            plt.ylim((0, max_cell_loss*2))
+
             plt.title('Comparison of loss per cell using two decompositions')
+
             if save:
                 plt.savefig(comp_folder.joinpath(f'{dn_res.name}_vs_{pf_res.name}_loss_per_cell.png'))
             if show:

@@ -468,16 +468,15 @@ def plot_usages_norm_clustermaps(
     
     if title is None:
         title = f'{adata.uns["name"]} programs normalized usages, k={normalized_usages.shape[1]}'
-    
-    default_clustermap_params = {
-        'row_colors': adata.obsm.get('row_colors', None),
-        'cmap': NON_NEG_CMAP,
-        'yticklabels': False,
-        'metric': metric,
-        'vmin': 0,
-        'vmax': 1,
-        'cbar_pos': (.02, .83, .05, .16)  # (left, bottom, width, height)
-        }
+
+    default_clustermap_params = dict(
+        row_colors=adata.obsm.get('row_colors', None),
+        cmap=NON_NEG_CMAP,
+        yticklabels=False,
+        xticklabels=True,
+        metric=metric,
+        vmin=0, vmax=1,
+        cbar_pos=(.02, .83, .05, .16))
     
     if sns_clustermap_params is None: sns_clustermap_params = dict()
     default_clustermap_params.update(sns_clustermap_params)
