@@ -35,6 +35,7 @@ from importlib import reload
 
 import sys
 import os
+import time
 
 import numpy as np
 import pandas as pd
@@ -140,6 +141,11 @@ stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, yl
 plt.show()
 del column_of_interest, stats_df
 
+# %%
+_utils.joint_hvg_across_stages(adata, obs_category_key='development_stage')
+adata.var
+
+
 # %% [markdown]
 # ### Splitting the adata by "development_stage", and creating a normalized variance layer
 
@@ -177,7 +183,7 @@ for stage in stages:
 
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 
-ks = [22, 23, 24, 25, 26, 27, 28, 29, 30]#[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+ks = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 
 for stage in stages:
     print(f'Starting on {stage}')
@@ -193,7 +199,7 @@ for stage in stages:
     
     c_object.factorize(0, 1, gpu=True)
     
-    # c_object.combine()
+    c_object.combine()
     
     del tmp, X
     
@@ -202,23 +208,13 @@ for stage in stages:
 # %%
 # %%time
 for stage in stages:
-    print(f'Starting on {stage}')
+    print(f'Starting on {stage}, time is {time.strftime("%H:%M:%S", time.localtime())}')
     c_object = cnmf.cNMF(cnmf_dir, stage)
     for thresh in [0.5, 0.4, 0.3]:
         print(f'working on threshold {thresh}')
         c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
                                   close_fig=True, show_clustering=True, gpu=True)
     
-
-
-# %%
-stage = 'P3'
-thresh = 0.45
-print(f'Starting on {stage}')
-c_object = cnmf.cNMF(cnmf_dir, stage)
-print(f'working on threshold {thresh}')
-c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
-                          close_fig=True, show_clustering=True, gpu=True)
 
 
 # %% [markdown]
@@ -239,14 +235,7 @@ for stage in stages:
 
     df_var[f'{stage}'] = c*100
     df_cumulative_var[f'{stage}'] = c.cumsum()*100
-    
-#     print(f'{stage} - cummulative variance percentages:'),
-#     for i in range(n_components):
-#         print(f'{c[i]*100: .2f}', end='\t')
-#     print()
-#     for i in range(n_components):
-#         print(f'{c.cumsum()[i]*100: .2f}', end='\t')
-#     print()
+
 
 # %%
 plt.plot(range(50), df_var, label=df_var.columns)
@@ -310,22 +299,20 @@ for stage, (k, threshold) in selected_cnmf_params.items():
     tmp.write_h5ad(split_adatas_dir.joinpath(f'{stage}_GEPs.h5ad'))
 
 
-# %% Loading GEPs adatas
-# %%time
-times = adata.obs.timesimple.cat.categories
-split_adatas_dir = _utils.set_dir(results_dir.joinpath('marjanovic_mmLungPlate_split'))
-
-split_adatas = {}
-for time in times:
-    split_adatas[time] = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}_GEPs.h5ad'))
-
 # %% [markdown]
 # ### Examening results
 
+# %% Loading GEPs adatas
+# %%time
+
+split_adatas = {}
+for stage in stages:
+    split_adatas[stage] = sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}_GEPs.h5ad'))
+
 # %%
-for time in times:
-    print(time)
-    s = split_adatas[time].obsm['usages_norm'].sum(axis=0)
+for stage in stages:
+    print(stage)
+    s = split_adatas[stage].obsm['usages_norm'].sum(axis=0)
     with np.printoptions(precision=2, suppress=False):
         print(s * 100 / s.sum())
 
@@ -540,4 +527,195 @@ plt.close()
 
 del name_map, G, edges, weights, i, layer, angles, node, nodes
 del fig, ax, layout, prog_order
+
+
+# %% [markdown]
+# # Epithelial compartment decomposition
+
+# %% [markdown]
+# ### Splitting the adata by "development_stage", retaining only epithelial cells and creating a normalized variance layer
+
+# %%
+# %%time
+
+stages = adata.obs.development_stage.cat.categories
+epi_split_adatas_dir = _utils.set_dir(results_dir.joinpath('epi_split_adatas'))
+
+for stage in stages:
+    print(f'working on stage {stage}')
+    file = epi_split_adatas_dir.joinpath(f'epi_{stage}.h5ad')
+    
+    if not file.exists():
+        tmp = adata[adata.obs.development_stage == stage]
+        tmp = tmp[(tmp.obs.compartment == 'epi') & (tmp.obs.celltype != 'unknown3')].copy()
+                
+        tmp.uns['name'] = f'Epi {stage}'   # full name
+        tmp.uns['sname'] = f'{stage}'  # short name, here it is the same
+
+        # correcting the gene counts
+        sc.pp.filter_genes(tmp, min_cells=0)
+        sc.pp.filter_genes(tmp, min_counts=0)
+
+        # calculating per sample HVGs
+        sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
+
+        tmp.write_h5ad(file)
+
+        del tmp
+
+
+# %% [markdown]
+# ### Running multiple NMF iterations
+
+# %%
+# %%time
+
+cnmf_dir = _utils.set_dir(results_dir.joinpath('epi_cnmf'))
+
+ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+for stage in stages:
+    print(f'Starting on epithelial {stage}, time is {time.strftime("%H:%M:%S", time.localtime())}')
+    tmp = sc.read_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}.h5ad'))
+    
+    c_object = cnmf.cNMF(cnmf_dir, stage)
+    
+    # Variance normalized version of the data
+    X = sc.pp.scale(tmp.X[:, tmp.var.highly_variable].toarray().astype(np.float32), zero_center=False)
+    
+    c_object.prepare(X, ks, n_iter=100, new_nmf_kwargs={'tol': _constants.NMF_TOLERANCE,
+                                                        'beta_loss': 'kullback-leibler'})
+    
+    c_object.factorize(0, 1, gpu=True)
+    
+    c_object.combine()
+    
+    del tmp, X
+    
+
+
+# %%
+# %%time
+for stage in stages:
+    print(f'Starting on {stage}, time is {time.strftime("%H:%M:%S", time.localtime())}')
+    c_object = cnmf.cNMF(cnmf_dir, stage)
+    for thresh in [0.5, 0.4, 0.3]:
+        print(f'working on threshold {thresh}')
+        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
+                                  close_fig=True, show_clustering=True, gpu=True)
+
+    
+
+
+# %% [markdown]
+# ### Selecting the decomposition rank utilizing K-selection plots and PCA variance explained
+
+# %%
+# %%time
+df_var = pd.DataFrame()
+df_cumulative_var = pd.DataFrame()
+
+n_components = 30
+
+for stage in stages:
+    
+    # %time tmp = sc.read_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}.h5ad'))
+    
+    a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.highly_variable], n_comps=n_components, return_info=True)
+
+    df_var[f'{stage}'] = c*100
+    df_cumulative_var[f'{stage}'] = c.cumsum()*100
+
+
+# %%
+plt.plot(range(len(df_var)), df_var, label=df_var.columns)
+plt.title('Variance explained')
+plt.legend()
+plt.yscale('log')
+plt.show()
+
+# %%
+plt.plot(df_cumulative_var.index, 100-df_cumulative_var, label=df_var.columns)
+plt.yscale('log')
+plt.title(f' 1- CDF variance explained')
+plt.legend()
+plt.show()
+
+# %%
+# %%time
+
+selected_cnmf_params = {
+    'E12': (7, 0.5),  # 
+    'E15': (8, 0.5),  # 
+    'E17': (10, 0.5),   # 
+    'P3': (9, 0.5),    # 
+    'P7': (8, 0.5),   # 
+    'P15': (5, 0.5),  # 
+    'P42': (5, 0.5)}   # 
+
+epi_split_adatas = {}
+
+for stage, (k, threshold) in selected_cnmf_params.items():
+    print(f'Working on epi {stage} with k={k} and threshold={threshold}')
+    # %time tmp = sc.read_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}.h5ad'))
+
+    c_object = cnmf.cNMF(cnmf_dir, stage)
+    c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                       nmf_refitting_iters=1000, show_clustering=False)
+
+    usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+
+    tmp.uns['cnmf_params'] = {'k_nmf': k, 'threshold': threshold}
+
+    tmp.obsm['usages'] = usages.copy()
+
+    usages_norm = usages / np.sum(usages, axis=1, keepdims=True)
+    tmp.obsm['usages_norm'] = usages_norm
+
+    # get per gene z-score of data after TPM normalization and log1p transformation 
+    tpm_log1p_zscore = tmp.X.toarray()
+    tpm_log1p_zscore /= 1e-6 * np.sum(tpm_log1p_zscore, axis=1, keepdims=True)
+    tpm_log1p_zscore = np.log1p(tpm_log1p_zscore)
+    tpm_log1p_zscore = sc.pp.scale(tpm_log1p_zscore)
+
+    usage_coefs = _utils.fastols(usages_norm, tpm_log1p_zscore)
+
+    tmp.varm['usage_coefs'] = pd.DataFrame(
+        usage_coefs.T, index=tmp.var.index,
+        columns=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
+    
+    epi_split_adatas[stage] = tmp
+
+    tmp.write_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}_GEPs.h5ad'))
+
+
+# %%
+epidata.obsm_keys()
+
+# %%
+stages = ['E12', 'E15', 'E17', 'P3', 'P7', 'P15', 'P42']
+decomposition_images = _utils.set_dir(results_dir.joinpath("epi_split_adatas", "images"))
+
+
+for stage in stages:
+    epidata = sc.read_h5ad(results_dir.joinpath("epi_split_adatas", f"epi_{stage}_GEPs.h5ad"))
+    
+    # UMAP
+    um = sc.pl.umap(epidata, color='celltype', s=10, return_fig=True, title=f'{stage} epithelial')
+    plt.tight_layout()
+    um.savefig(decomposition_images.joinpath(f"epi_{stage}_umap_celltype.png"), dpi=300)
+    plt.close(um)
+
+    # usages clustermap
+    un_sns = _utils.plot_usages_norm_clustermaps(
+        epidata, title=f'{stage}', show=False,sns_clustermap_params={
+            'row_colors': epidata.obs['celltype'].map(epidata.uns['celltype_colors_dict'])})
+    un_sns.savefig(decomposition_images.joinpath(f"epi_{stage}_usages_norm.png"),
+                   dpi=180, bbox_inches='tight')
+    plt.close(un_sns.fig)
+
+    # usages violin plot
+    _utils.plot_usages_norm_violin(
+        epidata, 'celltype', save_path=decomposition_images.joinpath(
+            f'epi_{stage}_norm_usage_per_lineage.png'))
 

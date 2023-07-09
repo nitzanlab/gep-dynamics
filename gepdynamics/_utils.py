@@ -89,6 +89,60 @@ def truncated_spearmans_correlation(data, truncation_level: int = 1000,
     ranked_data[ranked_data > truncation_level] = truncation_level
     return np.corrcoef(ranked_data, rowvar=False)
 
+def joint_hvg_across_stages(adata: sc.AnnData, obs_category_key: str, n_top_genes=5000):
+    """
+    Identifies joint highly variable genes across different stages/categories in single-cell RNA-seq data.
+    Based on Seurat v3 normalized variance [Stuart19]
+
+    Parameters
+    ----------
+    adata : sc.AnnData
+        Scanpy object.
+    obs_category_key : str
+        Key of the observation category/column in `adata.obs` that represents stages/categories.
+    n_top_genes : int, optional
+        Number of top highly variable genes to select (default is 5000).
+
+    Returns
+    -------
+    None
+
+    Modifies
+    --------
+    Updates `adata.var` by adding two new columns:
+    1. obs_category_key+'_max_var_norm' : numpy.ndarray
+        Maximum normalized variance across stages/categories.
+    2. 'joint_highly_variable' : numpy.ndarray
+        Boolean indicating if a gene is one of the top highly variable genes.
+
+    Examples
+    --------
+    >>> joint_hvg_across_stages(adata, obs_category_key='time_point')
+
+    """
+    # Calculate normalized variance of genes across all stages/categories
+    hvg_all = sc.pp.highly_variable_genes(adata, flavor='seurat_v3',
+                                          n_top_genes=n_top_genes, inplace=False).variances_norm
+
+    #Calculate normalized variance of genes for each stage/category
+    hvg_dfs = [sc.pp.highly_variable_genes(
+        adata[adata.obs[obs_category_key] == cat], flavor='seurat_v3', n_top_genes=n_top_genes,
+        inplace=False).variances_norm for cat in adata.obs[obs_category_key].cat.categories]
+
+    # Stack the variances_norm of all stages/categories
+    joint_variances_norm = np.vstack([hvg_all, *hvg_dfs])
+
+    # Compute the maximum variance_norm across stages/categories
+    maximal_variance_norm = joint_variances_norm.max(axis=0)
+
+    # Add the maximal_variance_norm as a new column in adata.var
+    adata.var[obs_category_key+'_max_var_norm'] = maximal_variance_norm
+
+    # Identify the top highly variable genes based on rank
+    adata.var['joint_highly_variable'] = adata.var[obs_category_key+'_max_var_norm'].rank(
+        ascending=False, method='min') <= n_top_genes
+
+
 def read_matlab_h5_sparse(filename: PathLike) -> csr_matrix:
     with h5py.File(filename, "r") as f:
         if set(f.keys()) != {'i', 'j', 'v'}:
