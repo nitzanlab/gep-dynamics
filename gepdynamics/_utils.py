@@ -17,7 +17,7 @@ import h5py
 import scanpy as sc
 
 from scipy.cluster import hierarchy
-from scipy.sparse import csr_matrix
+from scipy import sparse
 from scipy.stats import rankdata
 from sklearn.metrics import jaccard_score
 from gprofiler import GProfiler
@@ -143,7 +143,7 @@ def joint_hvg_across_stages(adata: sc.AnnData, obs_category_key: str, n_top_gene
         ascending=False, method='min') <= n_top_genes
 
 
-def read_matlab_h5_sparse(filename: PathLike) -> csr_matrix:
+def read_matlab_h5_sparse(filename: PathLike) -> sparse.csr_matrix:
     with h5py.File(filename, "r") as f:
         if set(f.keys()) != {'i', 'j', 'v'}:
             raise NotImplementedError("The h5 keys don't match the row, column, value format")
@@ -154,7 +154,7 @@ def read_matlab_h5_sparse(filename: PathLike) -> csr_matrix:
         cols = np.array(f['i'], dtype=int).flatten() - 1
         data = np.array(f['v']).flatten()
         
-    return csr_matrix((data, (rows, cols)))
+    return sparse.csr_matrix((data, (rows, cols)))
 
 
 def df_jaccard_score(df: pd.DataFrame) -> np.ndarray:
@@ -418,9 +418,23 @@ def heatmap_with_numbers(
     return ax
 
 
-
-
 # Scanpy AnnData objects related functions:
+def calculate_anndata_object_density(adata: sc.AnnData):
+    """
+    Calculate the proportion of non-zero values in the anndata object
+    """
+    if isinstance(adata.X, sparse.spmatrix):
+        non_zeros = adata.X.size
+    elif isinstance(adata.X, np.ndarray):
+        non_zeros = np.count_nonzero(adata.X)        
+    elif isinstance(adata.X, pd.DataFrame):
+        non_zeros = np.count_nonzero(adata.X.values)
+    else:
+        raise NotImplementedError(f"Cannot calculate density for data of type {type(adata.X)}")
+ 
+    return non_zeros / (adata.shape[0] * adata.shape[1])
+
+
 def _create_usages_norm_adata(adata):
     '''Given an adata with normalized usages of programs, create anndata'''
     var = pd.DataFrame(index=adata.varm['usage_coefs'].columns)

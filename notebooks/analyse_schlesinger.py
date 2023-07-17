@@ -15,25 +15,25 @@
 # ---
 
 # %% [markdown]
-# # Downloading, pre-processing and running cNMF on Schlesinger et. al 2020data
+# # Downloading, pre-processing and running cNMF on Schlesinger et. al 2020 data
 # 1. Obtaining the count matrix and complementary metadata
 #
-# 2. filtering genes, selecting joint highly variable genes (HVGs) and showing key statistics
+# 2. Filtering genes, embedding the data, and showing key statistics
 #
-# 3. Splitting the dataset by time after tumor induction, and selecting HVG per time
+# 3. Subsettign, splitting the dataset by time after tumor induction, and selecting joint highly variable genes (HVG)
 #
-# 3. Running consensus NMF (cNMF) per stage
+# 3. Running consensus NMF (cNMF) per time
 #
 # 4. Selecting parameters for the cNMF 
 #
-#
+# 5. Running the comparator
 
 # %%
 # %%time
 # %load_ext autoreload
 # %autoreload 2
 
-#debug:
+#debug code for ide:
 from importlib import reload
 
 import sys
@@ -55,24 +55,23 @@ from gepdynamics import comparator
 _utils.cd_proj_home()
 print(os.getcwd())
 
+results_dir = _utils.set_dir(_utils.set_dir('results').joinpath('schlesinger'))
 
 
-# %%
-from gepdynamics import comparator
 
 # %% [markdown]
-# ### Downloading and loading AnnData object
+# ## 1. Downloading and creating a basic AnnData object
 
 # %%
 # %%time
 
-results_dir = _utils.set_dir('results_schlesinger')
+data_dir = _utils.set_dir('data')
 
-orig_adata_path = results_dir.joinpath('GSE141017_ALL.h5ad')
+unprocessed_adata_path = data_dir.joinpath('GSE141017_ALL.h5ad')
 
-if not orig_adata_path.exists():  # create the original adata if it doesn't exist
+if not unprocessed_adata_path.exists():  # create the original adata if it doesn't exist
     # directories for file download:
-    data_dir = _utils.set_dir('data')
+    
     GSE_dir = _utils.set_dir(data_dir.joinpath('GSE141017'))
     
     # GEO server prefix for PDAC Series GSE141017
@@ -110,13 +109,13 @@ if not orig_adata_path.exists():  # create the original adata if it doesn't exis
     
     adata.X = sparse.csr_matrix(adata.X)
     
-    adata.write(orig_adata_path)
+    adata.write(unprocessed_adata_path)
     
     del raw_data, barcodes_ident   
 else:
-    adata = sc.read(orig_adata_path)
+    adata = sc.read(unprocessed_adata_path)
 
-print(f'Density of data = {(adata.X.size) / (adata.shape[0] * adata.shape[1]): .4f}')
+print(f'Density of data = {_utils.calculate_anndata_object_density(adata): .4f}')
 adata
 
 
@@ -125,6 +124,9 @@ pd.crosstab(adata.obs.ident, adata.obs.time_point)
 
 # %%
 sc.pl.highest_expr_genes(adata, n_top=20, )
+
+# %% [markdown]
+# ## 2. Filtering genes, embedding the data, and showing key statistics
 
 # %% [markdown]
 # ### Filter genes and plot basic statistics
@@ -182,6 +184,9 @@ sc.pl.violin(adata, ['n_genes', 'total_counts', 'pct_counts_mt',],
              jitter=0.4, multi_panel=True, groupby='time_point')
 
 
+# %% [markdown]
+# ### Creating embedding for the data
+
 # %%
 # %%time
 bdata = adata[:, adata.var.highly_variable].copy()
@@ -207,11 +212,11 @@ sc.pl.umap(bdata, color='time_point')
 sc.pl.umap(bdata, color='ident')
 
 # %%
-sc.pl.umap(adata, color=['Ptf1a', 'tdTomato'], vmax=[1, 50])
+sc.pl.umap(bdata, color=['Ptf1a', 'tdTomato'], vmax=[1, 50])
 
 
 # %%
-sc.pl.umap(adata, color=['Epcam', 'Ptprc'], vmax=[25, 2])
+sc.pl.umap(bdata, color=['Epcam', 'Ptprc'], vmax=[25, 2])
 
 
 # %% [markdown]
@@ -230,10 +235,52 @@ for obs_col in ['time_point', 'ident']:
 
 
 # %% [markdown]
-# ## joint highly variable genes
+# ### selecting jointly highly variable genes
 
 # %%
 _utils.joint_hvg_across_stages(adata, obs_category_key = 'time_point')
+
+# %% [markdown]
+# ### Saving/loading the pre-processed object
+
+# %%
+# %%time
+pre_processed_adata_file = results_dir.joinpath('full.h5ad')
+
+if not pre_processed_adata_file.exists():
+    adata.write(pre_processed_adata_file)
+else:
+    adata = sc.read(pre_processed_adata_file)
+
+# %% [markdown]
+# ## 3. Subsetting and splitting the dataset by time after tumor induction, and selecting joint highly variable genes (HVG)
+#
+
+# %% [markdown]
+# ### Subsetting relevant epithelial clusters (ductal-0, acinar-9 early 15 late, metaplastic-4 17, endocrine-18)
+
+# %%
+column_of_interest = 'time_point'
+
+subset_adata_file = results_dir.joinpath('subset.h5ad')
+if not subset_adata_file.exists():
+    subset = adata[adata.obs.ident.isin(['0', '4', '9', '15', '17', '18'])].copy()
+
+    # Removing genes that were probably miss-labeled:
+    subset = subset[subset.obsp['connectivities'].sum(axis=1)>=2.1]
+
+    sc.pp.filter_genes(subset, min_cells=0)
+    sc.pp.filter_genes(subset, min_counts=0)
+
+    _utils.joint_hvg_across_stages(subset, obs_category_key=column_of_interest)
+
+    subset.write(subset_adata_file)
+else:
+    subset = sc.read(subset_adata_file)
+    
+sc.pl.umap(subset, color=['time_point', 'ident'])
+
+
 
 # %% [markdown]
 # ### Splitting the adata by "time_point", and creating a normalized variance layer
@@ -241,25 +288,24 @@ _utils.joint_hvg_across_stages(adata, obs_category_key = 'time_point')
 # %%
 # %%time
 
-times = adata.obs.time_point.cat.categories
-split_adatas_dir = _utils.set_dir(results_dir.joinpath('split_adatas'))
+column_of_interest = 'time_point'
+categories = subset.obs[column_of_interest].cat.categories
 
-for t in times:
-    print(f'working on timepoint {t}')
-    if not split_adatas_dir.joinpath(f'{t}.h5ad').exists():
-        tmp = adata[adata.obs.time_point == t].copy()
+split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
 
-        tmp.uns['name'] = f'{t}'   # full name
-        tmp.uns['sname'] = f'{t[:3]}'  # short name, truncating CTRL to CTR
+for cat in categories:
+    print(f'working on {cat}')
+    if not split_adatas_dir.joinpath(f'{cat}.h5ad').exists():
+        tmp = subset[subset.obs[column_of_interest] == cat].copy()
+
+        tmp.uns['name'] = f'{cat}'   # full name
+        tmp.uns['sname'] = f'{cat[:3]}'  # short name, truncating CTRL to CTR
 
         # correcting the gene counts
         sc.pp.filter_genes(tmp, min_cells=0)
         sc.pp.filter_genes(tmp, min_counts=0)
 
-        # calculating per sample HVGs
-        sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
-
-        tmp.write_h5ad(split_adatas_dir.joinpath(f'{t}.h5ad'))
+        tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
         del tmp
 
@@ -268,20 +314,22 @@ for t in times:
 # ### Running multiple NMF iterations
 
 # %%
-# %%time
-
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 
-ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] #, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 
-for t in times:
-    print(f'Starting on {t}')
-    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{t}.h5ad'))
+# %%
+# %%time
+
+ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]#, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+
+for cat in categories:
+    print(f'Starting on {cat}')
+    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
     
-    c_object = cnmf.cNMF(cnmf_dir, t)
+    c_object = cnmf.cNMF(cnmf_dir, cat)
     
     # Variance normalized version of the data
-    X = sc.pp.scale(tmp.X[:, tmp.var.highly_variable].toarray().astype(np.float32), zero_center=False)
+    X = sc.pp.scale(tmp.X[:, tmp.var.joint_highly_variable].toarray().astype(np.float32), zero_center=False)
     
     c_object.prepare(X, ks, n_iter=100, new_nmf_kwargs={'tol': _constants.NMF_TOLERANCE,
                                                         'beta_loss': 'kullback-leibler'})
@@ -291,19 +339,17 @@ for t in times:
     c_object.combine()
     
     del tmp, X
-    
 
 
 # %%
 # %%time
-for t in times:
-    print(f'Starting on {t}, time is {time.strftime("%H:%M:%S", time.localtime())}')
-    c_object = cnmf.cNMF(cnmf_dir, t)
+for cat in categories:
+    print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
+    c_object = cnmf.cNMF(cnmf_dir, cat)
     for thresh in [0.5, 0.4, 0.3]:
         print(f'working on threshold {thresh}')
-        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
+        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=1000,
                                   close_fig=True, show_clustering=True, gpu=True)
-    
 
 
 # %% [markdown]
@@ -316,29 +362,36 @@ df_cumulative_var = pd.DataFrame()
 
 n_components = 50
 
-for t in times:
+for cat in categories:    
+    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
     
-    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{t}.h5ad'))
+    scaled_log1p_tp100k = np.log1p(np.array(tmp.X[:, tmp.var.joint_highly_variable] / np.sum(tmp.X, axis=1) * 1e4))
+    # remove zero-column (genes):
+    scaled_log1p_tp100k = scaled_log1p_tp100k[:, scaled_log1p_tp100k.sum(axis=0) > 0]
     
-    scaled_log1p_tp100k = np.log1p(tmp.X[:, tmp.var.highly_variable] / np.sum(tmp.X, axis=1) * 1e4)
-    scaled_log1p_tp100k -= _.mean(axis=0)
-    scaled_log1p_tp100k /= _.std(axis=0)
+    scaled_log1p_tp100k -= scaled_log1p_tp100k.mean(axis=0)
+    scaled_log1p_tp100k /= scaled_log1p_tp100k.std(axis=0)
     
     a, b, c, d, = sc.tl.pca(scaled_log1p_tp100k, n_comps=n_components, return_info=True)
 
-    df_var[f'{t}'] = c*100
-    df_cumulative_var[f'{t}'] = c.cumsum()*100
+    df_var[f'{cat}'] = c*100
+    df_cumulative_var[f'{cat}'] = c.cumsum()*100
+    
+    del tmp
 
 
 # %%
+df_var[:5]
+
+# %%
 plt.plot(range(50), df_var, label=df_var.columns)
-plt.title('Variance explained')
+plt.title('Percent variance explained')
 plt.legend()
 plt.yscale('log')
 plt.show()
 
 # %%
-plt.plot(df_cumulative_var.index, 100-df_cumulative_var, label=df_var.columns)
+plt.plot(df_cumulative_var.index, 1-df_cumulative_var/100, label=df_var.columns)
 plt.yscale('log')
 plt.title(f' 1- CDF variance explained')
 plt.legend()
@@ -348,21 +401,21 @@ plt.show()
 # %%time
 
 selected_cnmf_params = {
-    'CTRL': (8, 0.5),  # 
-    '17D': (9, 0.5),  # 
-    '6W': (10, 0.5),    # 
-    '3M': (11, 0.5),    # 
-    '5M': (11, 0.5),   # 
-    '9M': (10, 0.5),  # 
-    '15M': (11, 0.5)}   # 
+    'CTRL': (7, 0.5),  # 
+    '17D': (6, 0.5),  # 
+    '6W': (9, 0.5),    # 
+    '3M': (9, 0.5),    # 
+    '5M': (9, 0.5),   # 
+    '9M': (9, 0.5),  # 
+    '15M': (10, 0.5)}   # 
 
 split_adatas = {}
 
-for t, (k, threshold) in selected_cnmf_params.items():
-    print(f'Working on {t} with k={k} and threshold={threshold}')
-    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{t}.h5ad'))
+for cat, (k, threshold) in selected_cnmf_params.items():
+    print(f'Working on {cat} with k={k} and threshold={threshold}')
+    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
-    c_object = cnmf.cNMF(cnmf_dir, t)
+    c_object = cnmf.cNMF(cnmf_dir, cat)
     c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
                        nmf_refitting_iters=1000, show_clustering=False)
 
@@ -387,9 +440,9 @@ for t, (k, threshold) in selected_cnmf_params.items():
         usage_coefs.T, index=tmp.var.index,
         columns=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
     
-    split_adatas[t] = tmp
+    split_adatas[cat] = tmp
 
-    tmp.write_h5ad(split_adatas_dir.joinpath(f'{t}_GEPs.h5ad'))
+    tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
 
 # %% [markdown]
@@ -399,13 +452,13 @@ for t, (k, threshold) in selected_cnmf_params.items():
 # %%time
 
 split_adatas = {}
-for t in times:
-    split_adatas[t] = sc.read_h5ad(split_adatas_dir.joinpath(f'{t}_GEPs.h5ad'))
+for cat in categories:
+    split_adatas[cat] = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
 # %%
-for t in times:
-    print(t)
-    s = split_adatas[t].obsm['usages_norm'].sum(axis=0)
+for cat in categories:
+    print(cat)
+    s = split_adatas[cat].obsm['usages_norm'].sum(axis=0)
     with np.printoptions(precision=2, suppress=False):
         print(s * 100 / s.sum())
 
@@ -413,8 +466,8 @@ for t in times:
 # ## Running comparator on the data
 
 # %%
-for t in times:
-    tmp = split_adatas[t]
+for cat in categories:
+    tmp = split_adatas[cat]
 
     field_1 = 'ident'
 
@@ -425,13 +478,13 @@ for t in times:
 # %%
 # %%time
 
-pairs = [(times[i], times[i + 1]) for i in range(len(times) -1)]
+pairs = [(categories[i], categories[i + 1]) for i in range(len(categories) - 1)]
 
-for ta, tb in pairs:
-    comparison_dir = _utils.set_dir(results_dir.joinpath(f"{ta}_{stage_b}"))
+for cat_a, cat_b in pairs:
+    comparison_dir = _utils.set_dir(results_dir.joinpath(f"unique_genes_{cat_a}_{cat_b}"))
     
-    adata_a = split_adatas[ta]
-    adata_b = split_adatas[tb]
+    adata_a = split_adatas[cat_a]
+    adata_b = split_adatas[cat_b]
     
     if os.path.exists(comparison_dir.joinpath('comparator.npz')):
         cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
@@ -440,7 +493,7 @@ for ta, tb in pairs:
         
         print('decomposing')
         cmp.extract_geps_on_jointly_hvgs()
-        cmp.decompose_b(repeats = 20)
+        cmp.decompose_b(repeats = 5)
     
     cmp.examine_adata_a_decomposition_on_jointly_hvgs()
     
