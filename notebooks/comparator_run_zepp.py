@@ -21,31 +21,16 @@
 # %load_ext autoreload
 # %autoreload 2
 
-# import sys
 import os
 import warnings
 
-# from urllib.request import urlretrieve
-# from argparse import Namespace
-# from importlib import reload
 
-
-# import numpy as np
-# import pandas as pd
+import pandas as pd
 import scanpy as sc
-# import matplotlib.pyplot as plt
-# import seaborn as sns
-# import networkx as nx
 
-# from sklearn.decomposition import _nmf as sknmf
 from sklearn.exceptions import ConvergenceWarning
-# from scipy.stats import rankdata
-# from scipy.cluster import hierarchy
 
 from gepdynamics import _utils
-# from gepdynamics import _constants
-# from gepdynamics import cnmf
-# from gepdynamics import pfnmf
 from gepdynamics import comparator
 
 # Move to the project's home directory, as defined in _constants
@@ -58,66 +43,141 @@ results_dir = _utils.set_dir('results_zepp')
 
 split_adatas_dir = results_dir.joinpath('split_adatas')
 
-k_12 = sc.read_h5ad(split_adatas_dir.joinpath('04_K_12w_ND_GEPs.h5ad'))
+stages = ['E12', 'E15', 'E17', 'P3', 'P7', 'P15', 'P42']
 
-k_30 = sc.read_h5ad(split_adatas_dir.joinpath('05_K_30w_ND_GEPs.h5ad'))
-
-kp_12 = sc.read_h5ad(split_adatas_dir.joinpath('06_KP_12w_ND_GEPs.h5ad'))
-
-kp_30 = sc.read_h5ad(split_adatas_dir.joinpath('08_KP_30w_ND_GEPs.h5ad'))
-
-# %% [markdown]
-# ### Comparing Kras 12 and 30 weeks
-
-# %%
-import numpy as np
-def load_from_file(filename: _utils.PathLike, adata_a: sc.AnnData, adata_b: sc.AnnData) -> 'Comparator':
-    # make sure the file exists
-    assert os.path.exists(filename), f'File {filename} does not exist'
-
-    new_instance = np.load(filename, allow_pickle=True)['obj'].item()
-
-    new_instance.adata_a = adata_a
-    new_instance.adata_b = adata_b
-    return new_instance
+split_adatas = {stage: sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}_GEPs.h5ad')) for stage in stages}
 
 
 # %%
+for stage in stages:
+    tmp = split_adatas[stage]
+    # pd.Categorical(adata.obs['timesimple'].map(
+    #    dict(zip(pd.Categorical(adata.obs['timesimple']).categories, adata.uns['timesimple_colors']))))
+    field_1 = 'compartment'
+    field_2 = 'celltype'
+    tmp.obsm['row_colors'] = pd.concat([
+        tmp.obs[field_1].map(tmp.uns[f'{field_1}_colors_dict']),
+        tmp.obs[field_2].map(tmp.uns[f'{field_2}_colors_dict'])], axis=1)
 
-pairs = [(k_12, k_30), (k_30, k_12), (kp_12, kp_30), (kp_30, kp_12), (k_12, kp_12), (k_30, kp_30)]
-
-for adata_a, adata_b in pairs:
-    comparison_dir = results_dir.joinpath(f"{adata_a.uns['sname']}_{adata_b.uns['sname']}")
-
-    tst = comparator.Comparator(
-        adata_a, adata_a.obsm['usages'], adata_b, comparison_dir, 'torchnmf',
-        max_nmf_iter=800, verbosity=1, )
-
-    with warnings.catch_warnings():  # supress convergence warning
-        warnings.simplefilter(action='ignore', category=ConvergenceWarning)
-        tst.extract_geps_on_jointly_hvgs()
-
-    tst.decompose_b(repeats=10)
-
-    tst.plot_loss_per_cell_histograms(show=False)
-    tst.plot_usages_clustermaps(show=False)
-    tst.plot_decomposition_comparisons(show=False)
-    tst.run_gsea(gprofiler_kwargs=dict(organism='hsapiens', sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
-
-    tst.calculate_fingerprints()
-
-    tst.print_errors()
-
-    tst.save_to_file(comparison_dir.joinpath('comparator.npz'))
 
 # %%
-for adata_a, adata_b in [(k_12, k_30), (k_30, k_12), (k_12, kp_12),
-                         (k_30, kp_30), (kp_12, kp_30), (kp_30, kp_12)]:
-    comparison_dir = results_dir.joinpath(f"{adata_a.uns['sname']}_{adata_b.uns['sname']}", 'comparator.npz')
+# %%time
+
+pairs = [(stages[i], stages[i + 1]) for i in range(len(stages) -1)]
+
+for stage_a, stage_b in pairs:
+    comparison_dir = _utils.set_dir(results_dir.joinpath(f"{stage_a}_{stage_b}"))
     
-    tst = comparator.Comparator.load_from_file(comparison_dir, adata_a, adata_b)
-    for res in tst._all_results:
-        res.calculate_prog_labels()
-    tst.a_result.calculate_prog_labels()
+    adata_a = split_adatas[stage_a]
+    adata_b = split_adatas[stage_b]
     
-    tst.save_to_file(comparison_dir)
+    if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+        cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    else:
+        cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir, 'torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1)
+        
+        print('decomposing')
+        cmp.extract_geps_on_jointly_hvgs()
+        cmp.decompose_b(repeats = 20)
+    
+    cmp.examine_adata_a_decomposition_on_jointly_hvgs()
+    
+    cmp.print_errors()
+    cmp.examine_adata_b_decompositions()
+    cmp.plot_decomposition_comparisons()
+    
+    cmp.calculate_fingerprints()
+    
+    print('running GSEA')
+    cmp.run_gsea(gprofiler_kwargs=dict(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG', 'TF', 'HP']))
+
+    cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
+
+    
+
+# %%
+for stage_a, stage_b in pairs:
+    comparison_dir = results_dir.joinpath(f"{stage_a}_{stage_b}", 'comparator.npz')
+    
+    adata_a = split_adatas[stage_a]
+    adata_b = split_adatas[stage_b]
+    
+    cmp = comparator.Comparator.load_from_file(comparison_dir, adata_a, adata_b)
+    break
+
+
+# %% [markdown] tags=[]
+# ### Epithelial only comparator objects
+
+# %%
+# %%time
+
+epi_split_adatas_dir = results_dir.joinpath('epi_split_adatas')
+
+stages = ['E12', 'E15', 'E17', 'P3', 'P7', 'P15', 'P42']
+
+epi_split_adatas = {stage: sc.read_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}_GEPs.h5ad')) for stage in stages}
+
+
+# %%
+for stage in stages:
+    tmp = epi_split_adatas[stage]
+
+    field_1 = 'compartment'
+    field_2 = 'celltype'
+    tmp.obsm['row_colors'] = pd.concat([
+        tmp.obs[field_1].map(tmp.uns[f'{field_1}_colors_dict']),
+        tmp.obs[field_2].map(tmp.uns[f'{field_2}_colors_dict'])], axis=1)
+
+
+# %%
+# %%time
+
+pairs = [(stages[i], stages[i + 1]) for i in range(len(stages) -1)]
+pairs = [('P7', 'P15', )]
+
+for stage_a, stage_b in pairs:
+    comparison_dir = _utils.set_dir(results_dir.joinpath(f"epi_{stage_a}_{stage_b}"))
+    
+    adata_a = epi_split_adatas[stage_a]
+    adata_b = epi_split_adatas[stage_b]
+    
+    if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+        cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    else:
+        cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir, 'sklearn', max_nmf_iter=1000, verbosity=1)
+        
+        print('decomposing')
+        cmp.extract_geps_on_jointly_hvgs()
+        cmp.decompose_b(repeats = 20)
+    
+    cmp.examine_adata_a_decomposition_on_jointly_hvgs()
+    
+    cmp.print_errors()
+    cmp.examine_adata_b_decompositions()
+    cmp.plot_decomposition_comparisons()
+    
+    cmp.calculate_fingerprints()
+    
+    print('running GSEA')
+    cmp.run_gsea(gprofiler_kwargs=dict(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG', 'TF', 'HP']))
+
+    cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
+
+# %%
+for stage_a, stage_b in pairs:
+    comparison_dir = _utils.set_dir(results_dir.joinpath(f"epi_{stage_a}_{stage_b}"))
+    
+    adata_a = epi_split_adatas[stage_a]
+    adata_b = epi_split_adatas[stage_b]
+    
+    cmp = comparator.Comparator.load_from_file(comparison_dir, adata_a, adata_b)
+    break
+
+
+# %%
+var_names_gt_2 = sc.pp.filter_genes(epi_split_adatas['E15'].X, min_cells=2)[0]
+np.sum(var_names_gt_2)
+
+# %%
+cmp
