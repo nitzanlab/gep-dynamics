@@ -29,7 +29,7 @@ import os
 import resource
 
 from copy import copy
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any, List, Union
 
 import networkx as nx
 import numpy as np
@@ -280,6 +280,8 @@ class Comparator(object):
                  beta_loss: str = 'kullback-leibler',
                  max_nmf_iter: int = 800,
                  max_added_rank: int = 3,
+                 # either string or integer
+                 highly_variable_genes: Union[str, int] = NUMBER_HVG,
                  device: str = None,
                  verbosity: int = 0
                  ):
@@ -291,7 +293,7 @@ class Comparator(object):
         adata_a : sc.AnnData
             Annotated data for timepoint A.
         usages_matrix_a : np.ndarray
-            Usages matrix for timepoint A (H in Matan's terminology).
+            Usages matrix for timepoint A.
         adata_b : sc.AnnData
             Annotated data for timepoint B.
         results_dir : _utils.PathLike
@@ -304,6 +306,10 @@ class Comparator(object):
             Maximum number of iterations for NMF, by default 800.
         max_added_rank : int, optional
             Maximum additional rank for GEPs, by default 3.
+        highly_variable_genes : Union[str, int], optional
+            Either the adata_a.var key for joint highly variable genes, or the
+            number of automatically found jointly highly variable genes for the
+             two datasets. by default `_constants.NUMBER_HVG`.
         device : str, optional
             Device to use for torch-based NMF engine, by default None.
         verbosity : int, optional
@@ -319,15 +325,26 @@ class Comparator(object):
 
         self.results_dir = _utils.set_dir(results_dir)
         self.verbosity = verbosity
+
         self.beta_loss = beta_loss
         self.max_nmf_iter = max_nmf_iter
         self.max_added_rank = max_added_rank
-
         self.nmf_engine = nmf_engine
         self.device = device
 
+        if isinstance(highly_variable_genes, str):
+            assert highly_variable_genes in self.adata_a.var.keys(), \
+                f"adata_a.var does not contain key {highly_variable_genes}"
+        elif isinstance(highly_variable_genes, int):
+            assert highly_variable_genes <= self.adata_a.n_vars, \
+                f"Number of highly variable genes {highly_variable_genes} " \
+                f"exceeds the number of genes in adata_a ({self.adata_a.n_vars})"
+        else:
+            # wrong type of highly variable genes
+            raise TypeError(f"highly_variable_genes must be either str or int")
+        self.joint_hvgs = highly_variable_genes
+
         # Fields to be filled in later
-        self.joint_hvgs = None
         self.geps_a = None
         self.a_result = None
         self.fnmf_result = None
@@ -366,7 +383,6 @@ class Comparator(object):
         return f'Comparator(adata_a={self.a_sname}, adata_b={self.b_sname}) at' \
                f' stage {self.stage}. engine={self.nmf_engine}.'
 
-
     def save_to_file(self, filename: _utils.PathLike):
         """
         Save the Comparator object to a ".npz" file, excluding the adata fields.
@@ -374,7 +390,7 @@ class Comparator(object):
         Parameters
         ----------
         filename : PathLike
-            The path and filename to save the object to.
+            The path and filename to save the object to. Behavs like the `filename` parameter of `numpy.savez`.
 
         Returns
         -------
@@ -445,7 +461,7 @@ class Comparator(object):
 
     def _normalize_adata_for_decomposition(self, adata: sc.AnnData, method='variance') -> sc.AnnData:
         """
-        Normalize adata for decomposition, fit the type to the usages matrix type.
+        Normalize adata for decomposition, fit the data type to `self.usages_matrix_a.dtype`.
         """
         if method == 'variance':
             normalized = sc.pp.scale(adata[:, self.joint_hvgs].X.toarray(), zero_center=False)
@@ -456,14 +472,22 @@ class Comparator(object):
         """
         Identify A GEPs on timepoints A and B jointly highly variable genes
         """
-        genes_subset = (self.adata_a.var.n_cells >= min_cells_per_gene) & (
-            self.adata_b.var.n_cells >= min_cells_per_gene)
-        hvg_a = sc.pp.highly_variable_genes(
-            self.adata_a[:, genes_subset], flavor='seurat_v3', n_top_genes=100_000, inplace=False)
-        hvg_b = sc.pp.highly_variable_genes(
-            self.adata_b[:, genes_subset], flavor='seurat_v3', n_top_genes=100_000, inplace=False)
-        joint_hvg_rank = hvg_a.highly_variable_rank + hvg_b.highly_variable_rank
-        self.joint_hvgs = joint_hvg_rank.sort_values()[: NUMBER_HVG].index
+        # assert state is INITIALIZED
+        assert self.stage == Stage.INITIALIZED, \
+            f"stage is {self.stage}, expected {Stage.INITIALIZED}"
+
+        # if joint_hvgs is numeric, use it as the number of joint genes
+        if isinstance(self.joint_hvgs, int):
+            genes_subset = (self.adata_a.var.n_cells >= min_cells_per_gene) & (
+                self.adata_b.var.n_cells >= min_cells_per_gene)
+            hvg_a = sc.pp.highly_variable_genes(
+                self.adata_a[:, genes_subset], flavor='seurat_v3', n_top_genes=100_000, inplace=False)
+            hvg_b = sc.pp.highly_variable_genes(
+                self.adata_b[:, genes_subset], flavor='seurat_v3', n_top_genes=100_000, inplace=False)
+            joint_hvg_rank = hvg_a.highly_variable_rank + hvg_b.highly_variable_rank
+            self.joint_hvgs = joint_hvg_rank.sort_values()[: self.joint_hvgs].index
+        else:
+            self.joint_hvgs = self.adata_a.var[self.joint_hvgs].index
 
         # Extracting GEPs on joint HVG, working in the transposed notation
         #  to get the programs: X_a.T ~ geps.T @ usages.T
@@ -502,12 +526,7 @@ class Comparator(object):
             H=W.T)
 
         # calculate gene coefs for each GEP
-        z_scores = sc.pp.normalize_total(self.adata_a, target_sum=1e6,
-                                         inplace=False)['X']
-        z_scores = sc.pp.log1p(z_scores)
-        z_scores = sc.pp.scale(z_scores, max_value=10)
-
-        self.a_result.calculate_gene_coefs(z_scores, self.adata_a.var_names)
+        self._calculate_gene_coefficients(self.adata_a, [self.a_result])
 
         self.stage = Stage.PREPARED
 
@@ -598,7 +617,7 @@ class Comparator(object):
             del tens
 
         else:
-            # not implementd
+            # not implemented
             raise NotImplementedError(f'nmf engine {self.nmf_engine} not implemented')
 
         if self.verbosity > 0:
@@ -607,7 +626,7 @@ class Comparator(object):
 
         self._all_results = self.denovo_results + [self.fnmf_result] + self.pfnmf_results
 
-        self._calculate_gene_coefficients()
+        self._calculate_gene_coefficients(self.adata_b, self._all_results)
 
         self.stage = Stage.DECOMPOSED
 
@@ -644,6 +663,9 @@ class Comparator(object):
 
         for added_rank in range(self.max_added_rank + 1):
             rank = self.rank_a + added_rank
+
+            if self.verbosity > 0:
+                print(f'Decomposing B de-novo, rank={rank}')
 
             nmf_kwargs={
                 'n_components': rank,
@@ -703,17 +725,6 @@ class Comparator(object):
                               f"error = {final_loss: .1f}")
 
             self.pfnmf_results.append(best_result)
-
-    def _calculate_gene_coefficients(self):
-        """
-        Calculate gene coefficients for all the newly decomposed GEPs
-        """
-        z_scores = sc.pp.normalize_total(self.adata_b, target_sum=1e6, inplace=False)['X']
-        z_scores = sc.pp.log1p(z_scores)
-        z_scores = sc.pp.scale(z_scores, max_value=10)
-
-        for res in self._all_results:
-            res.calculate_gene_coefs(z_scores, self.adata_b.var_names)
 
     def print_errors(self):
         """
@@ -965,6 +976,7 @@ class Comparator(object):
         gene_IDs_column_name = self.adata_a.var.columns[gene_ids_column_number]
 
         programs_top_genes_dir = _utils.set_dir(self.results_dir.joinpath('programs_top_genes'))
+
         for res in [self.a_result, *self._all_results]:
             top_genes_df = res.get_top_genes(n_top_genes)
             top_genes_df.to_csv(programs_top_genes_dir.joinpath(f'{res.name}_top_genes.csv'))
@@ -1158,6 +1170,20 @@ class Comparator(object):
 
             output.append(df)
         return output
+
+    @staticmethod
+    def _calculate_gene_coefficients(adata: sc.AnnData,
+                                     results_list: List[NMFResultBase],
+                                     target_sum=100_000):
+        """
+        Calculate gene coefficients for all the newly decomposed GEPs
+        """
+        z_scores = sc.pp.normalize_total(adata, target_sum=target_sum, inplace=False)['X']
+        z_scores = sc.pp.log1p(z_scores)
+        z_scores = sc.pp.scale(z_scores, max_value=10)
+
+        for res in results_list:
+            res.calculate_gene_coefs(z_scores, adata.var_names)
 
     @staticmethod
     def _run_nmf(x, nmf_kwargs, name, tens: 'torch.Tensor' = None, verbose: int = 0) -> NMFResult:

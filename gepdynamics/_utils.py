@@ -432,13 +432,15 @@ def plot_usages_norm_violin(
     prog_order = hierarchy.leaves_list(hierarchy.optimal_leaf_ordering(
         linkage, u_data.X.T))
 
+    title = f'{u_data.uns["name"]} program usage per {group_by_key}'
+
     vp = sc.pl.stacked_violin(
         u_data, u_data.var_names[prog_order], groupby=group_by_key,
-        return_fig=True, dendrogram=True)
-    vp.fig_title = f'{u_data.uns["name"]} program usage per {group_by_key}'
+        return_fig=True, dendrogram=True, title=title)
 
     if save_path is not None:
         vp.savefig(save_path, dpi=180)
+
     if close:
         plt.close(vp.fig)
 
