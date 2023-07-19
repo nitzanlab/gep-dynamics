@@ -280,7 +280,6 @@ class Comparator(object):
                  beta_loss: str = 'kullback-leibler',
                  max_nmf_iter: int = 800,
                  max_added_rank: int = 3,
-                 # either string or integer
                  highly_variable_genes: Union[str, int] = NUMBER_HVG,
                  device: str = None,
                  verbosity: int = 0
@@ -487,7 +486,7 @@ class Comparator(object):
             joint_hvg_rank = hvg_a.highly_variable_rank + hvg_b.highly_variable_rank
             self.joint_hvgs = joint_hvg_rank.sort_values()[: self.joint_hvgs].index
         else:
-            self.joint_hvgs = self.adata_a.var[self.joint_hvgs].index
+            self.joint_hvgs = self.adata_a.var.index[self.adata_a.var[self.joint_hvgs]]
 
         # Extracting GEPs on joint HVG, working in the transposed notation
         #  to get the programs: X_a.T ~ geps.T @ usages.T
@@ -582,9 +581,10 @@ class Comparator(object):
         ----------
 
         # TODO: add normalization option
-        # TODO: add support for repeats > 1 in de-novo and fnmf (requires random initialization
+        # TODO: add support for repeats > 1 in de-novo and fnmf (requires random initialization)
         """
         if self.stage == Stage.INITIALIZED:
+            print('Object not prepared, extracting GEPs on jointly highly variable genes')
             self.extract_geps_on_jointly_hvgs()
 
         X_b = self._normalize_adata_for_decomposition(self.adata_b)
@@ -685,8 +685,6 @@ class Comparator(object):
         Parameters
         ----------
 
-        # TODO: add multiple repeats and selection of the best
-        # TODO: improve verbosity code to include what step we are in
         """
         # pfnmf is written for constant W_1, so we will transpose as needed:
         # X_b ~ W_1 @ geps_a + W_2 @ H_2  <--> X_b.T ~ geps_a.T @ W_1.T + H_2.T @ W_2.T

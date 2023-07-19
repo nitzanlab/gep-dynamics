@@ -76,14 +76,16 @@ def calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss=1, square_root=False, 
         If per_column is True, returns an array of the beta divergence errors between each column
         of X and the corresponding column of W*H.
     '''
-    W = np.concatenate([w_1, w_2], axis=1)
-    H = np.concatenate([h_1, h_2], axis=0)
-    
+
     if not per_column:
-        return sknmf._beta_divergence(X, W, H, beta=beta_loss, square_root=square_root)
+        return sknmf._beta_divergence(X, np.concatenate([w_1, w_2], axis=1),
+                                      np.concatenate([h_1, h_2], axis=0),
+                                      beta=beta_loss, square_root=square_root)
     else:
         result = np.full((X.shape[1]), np.inf)
-        
+        W = np.concatenate([w_1, w_2], axis=1)
+        H = np.concatenate([h_1, h_2], axis=0)
+
         for col in range(X.shape[1]):
             result[col] = sknmf._beta_divergence(
                 X[:, col: col + 1], W, H[:, col: col + 1], beta=beta_loss, square_root=square_root)
@@ -107,9 +109,9 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
     if np.count_nonzero(X.sum(axis=0)) != n_samples:
         raise ValueError(
             f'X has an all-zeros sample')
-    if np.count_nonzero(X.sum(axis=1)) != m_features:
-        raise ValueError(
-            f'X has an all-zeros feature')
+    # if np.count_nonzero(X.sum(axis=1)) != m_features:
+    #     raise ValueError(
+    #         f'X has an all-zeros feature')
     epsilon = np.finfo(X.dtype).eps
 
     # Assert legal dimensions of w1 and w2 / rank_2 match
@@ -183,12 +185,12 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
 
     # start iterations
     for n_iter in range(1, max_iter + 1):
-        # TODO: realize replacement of multipling @ rep with sum
+        # TODO: realize replacement of multiplying @ rep with sum
 
         approx = w1 @ h1 + w2 @ h2
         # update H
         if beta_loss == 1:   # KL
-            approx[approx < epsilon] = epsilon # avoid devision by zero
+            approx[approx < epsilon] = epsilon # avoid division by zero
             x_over_approx = X / approx
             h1 = h1 * (w1.T @ x_over_approx) / (w1.T @ rep)
             h2 = h2 * (w2.T @ x_over_approx) / (w2.T @ rep)
