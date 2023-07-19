@@ -17,11 +17,11 @@
 # %% [markdown]
 # # Downloading, pre-processing and running cNMF on Zepp et. al 2021 data
 # 1. Obtaining the AnnData object and complementary metadata
-#
-# 2. filtering genes, selecting joint highly variable genes (HVGs) and showing key statistics
-# 3. Splitting the dataset by developmental stage, and selecting HVG per stage
-# 3. Running consensus NMF (cNMF) per stage
-# 4. Selecting parameters for the cNMF 
+# 2. filtering genes, and showing key statistics
+# 3. Subsetting and splitting the dataset by developmental stage, and selecting joint highly variable genes (HVG)
+# 4. Running consensus NMF (cNMF) per stage
+# 5. Selecting parameters for the cNMF
+# 6. Running the comparator for adjacent steps
 #
 #
 
@@ -40,24 +40,27 @@ import time
 import numpy as np
 import pandas as pd
 from scipy import sparse
+from sklearn.metrics import silhouette_samples
 import scanpy as sc
 import matplotlib.pyplot as plt
 
 from gepdynamics import _utils
 from gepdynamics import _constants
 from gepdynamics import cnmf
+from gepdynamics import comparator
 
 _utils.cd_proj_home()
 print(os.getcwd())
-# os.chdir('/cs/labs/mornitzan/yotamcon/gep-dynamics')
+
 
 
 # %% [markdown]
-# ### Downloading and loading AnnData object
-# The adata contains log1p(CP10K) data, so we keep the transformed data in `raw`, and add the original counts as `X`
+# ## 1. Obtaining the AnnData object and complementary metadata
+# The adata contains log1p(CP10K) data, we un-transform the data to have the original counts as `X`
 
 # %%
-results_dir = _utils.set_dir('results_zepp')
+results_dir = _utils.set_dir('results')
+results_dir = _utils.set_dir(results_dir.joinpath('zepp'))
 data_dir = _utils.set_dir('data')
 GSE_dir = _utils.set_dir(data_dir.joinpath('GSE149563'))
 
@@ -83,8 +86,11 @@ metadata = pd.read_csv(GSE_dir.joinpath('AllTimePoints_metadata.csv'), index_col
 adata.obs['celltype'] = metadata.var_celltype
 adata.obs['compartment'] = metadata.var_compartment
 
-adata.raw = adata
-adata.X = (sparse.csc_matrix(adata.obs.n_molecules.values[:, None] / 10_000).multiply(adata.X.expm1())).rint()
+untransformed = sparse.csr_matrix(adata.obs.n_molecules.values[:, None].astype(np.float32) / 10_000).multiply(adata.X.expm1())
+adata.X = sparse.csc_matrix(untransformed).rint()
+
+del untransformed
+
 adata
 
 
@@ -111,10 +117,12 @@ pd.crosstab(adata.obs.celltype, adata.obs.development_stage)
 pd.crosstab(adata.obs.celltype, adata.obs.compartment)
 
 # %% [markdown]
-# ### Filter genes and plot basic statistics
+# ## 2. filtering genes, selecting joint highly variable genes (HVGs) and showing key statistics
+#
 
 # %%
 # %%time
+print(f'before filtering shape was {adata.X.shape}')
 
 # filtering genes with very low abundance
 sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 1000))
@@ -125,6 +133,9 @@ sc.pp.filter_cells(adata, min_counts=0)
 sc.pp.filter_cells(adata, min_genes=0)
 
 sc.pp.highly_variable_genes(adata, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
+
+print(f'after filtering shape is {adata.X.shape}')
+
 adata
 
 # %%
@@ -137,62 +148,112 @@ stats_df = pd.concat([adata.obs.groupby([column_of_interest]).count().iloc[:, 0]
                       stats_df], axis=1)
 stats_df.columns = ['# cells', 'median # genes', 'median # counts']
 
-stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, ylim=((5e2, 2e5)))
+stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, ylim=((5e2, 3e4)))
 plt.show()
 del column_of_interest, stats_df
 
 # %%
-_utils.joint_hvg_across_stages(adata, obs_category_key='development_stage')
+_utils.joint_hvg_across_stages(adata, obs_category_key='development_stage', n_top_genes=5000)
 adata.var
 
 
 # %% [markdown]
-# ### Splitting the adata by "development_stage", and creating a normalized variance layer
+# ### Saving/loading the pre-processed object
+
+# %%
+# %%time
+pre_processed_adata_file = results_dir.joinpath('full.h5ad')
+
+if not pre_processed_adata_file.exists():
+    adata.write(pre_processed_adata_file)
+else:
+    adata = sc.read(pre_processed_adata_file)
+adata
+
+# %% [markdown]
+# ## 3. Subsetting and splitting the dataset by stage, and selecting joint highly variable genes (HVG)
+#
+
+# %% [markdown]
+# ### Splitting the adata by "development_stage", retaining only epithelial cells and creating a normalized variance layer
 
 # %%
 # %%time
 
-stages = adata.obs.development_stage.cat.categories
-split_adatas_dir = _utils.set_dir(results_dir.joinpath('split_adatas'))
+column_of_interest = 'development_stage'
 
-for stage in stages:
-    print(f'working on stage {stage}')
-    if not split_adatas_dir.joinpath(f'{stage}.h5ad').exists():
-        tmp = adata[adata.obs.development_stage == stage].copy()
+subset_adata_file = results_dir.joinpath('subset.h5ad')
+if not subset_adata_file.exists():
+    subset = adata[(adata.obs.compartment == 'epi') & (adata.obs.celltype != 'unknown3')].copy()
 
-        tmp.uns['name'] = f'{stage}'   # full name
-        tmp.uns['sname'] = f'{stage}'  # short name, here it is the same
+    sc.pp.filter_genes(subset, min_cells=1)
+    sc.pp.filter_genes(subset, min_counts=1)
+
+    _utils.joint_hvg_across_stages(subset, obs_category_key=column_of_interest, n_top_genes=5000)
+
+    subset.write(subset_adata_file)
+else:
+    subset = sc.read(subset_adata_file)
+
+# umap by celltype:
+sc.pl.umap(subset, color=[column_of_interest, 'celltype'])
+
+# statistics
+stats_df = subset.obs.loc[:, [column_of_interest, 'n_genes', 'n_counts']].groupby(
+    [column_of_interest]).median()
+
+stats_df = pd.concat([subset.obs.groupby([column_of_interest]).count().iloc[:, 0],
+                      stats_df], axis=1)
+stats_df.columns = ['# cells', 'median # genes', 'median # counts']
+
+stats_df.plot(kind='bar', title=f'Subset {column_of_interest} statistics', log=True, ylim=((1e2, 2e4)))
+plt.show()
+del stats_df
+
+subset
+
+# %%
+# %%time
+
+categories = subset.obs[column_of_interest].cat.categories
+
+split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
+
+for cat in categories:
+    print(f'working on {cat}')
+    if not split_adatas_dir.joinpath(f'{cat}.h5ad').exists():
+        tmp = subset[subset.obs[column_of_interest] == cat].copy()
+
+        tmp.uns['name'] = f'{cat}'   # full name
+        tmp.uns['sname'] = f'{cat[:3]}'  # short name, here it is the same
 
         # correcting the gene counts
         sc.pp.filter_genes(tmp, min_cells=0)
         sc.pp.filter_genes(tmp, min_counts=0)
 
-        # calculating per sample HVGs
-        sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
-
-        tmp.write_h5ad(split_adatas_dir.joinpath(f'{stage}.h5ad'))
+        tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
         del tmp
-
 
 # %% [markdown]
 # ### Running multiple NMF iterations
 
 # %%
-# %%time
-
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 
-ks = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+# %%
+# %%time
 
-for stage in stages:
-    print(f'Starting on {stage}')
-    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}.h5ad'))
+ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]#, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+
+for cat in categories:
+    print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
+    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
     
-    c_object = cnmf.cNMF(cnmf_dir, stage)
+    c_object = cnmf.cNMF(cnmf_dir, cat)
     
     # Variance normalized version of the data
-    X = sc.pp.scale(tmp.X[:, tmp.var.highly_variable].toarray().astype(np.float32), zero_center=False)
+    X = sc.pp.scale(tmp.X[:, tmp.var.joint_highly_variable].toarray().astype(np.float32), zero_center=False)
     
     c_object.prepare(X, ks, n_iter=100, new_nmf_kwargs={'tol': _constants.NMF_TOLERANCE,
                                                         'beta_loss': 'kullback-leibler'})
@@ -202,20 +263,16 @@ for stage in stages:
     c_object.combine()
     
     del tmp, X
-    
-
 
 # %%
 # %%time
-for stage in stages:
-    print(f'Starting on {stage}, time is {time.strftime("%H:%M:%S", time.localtime())}')
-    c_object = cnmf.cNMF(cnmf_dir, stage)
-    for thresh in [0.5, 0.4, 0.3]:
+for cat in categories:
+    print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
+    c_object = cnmf.cNMF(cnmf_dir, cat)
+    for thresh in [0.5, 0.4]:
         print(f'working on threshold {thresh}')
-        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
+        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=1000,
                                   close_fig=True, show_clustering=True, gpu=True)
-    
-
 
 # %% [markdown]
 # ### Selecting the decomposition rank utilizing K-selection plots and PCA variance explained
@@ -227,409 +284,19 @@ df_cumulative_var = pd.DataFrame()
 
 n_components = 50
 
-for stage in stages:
+for cat in categories:
     
-    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}.h5ad'))
+    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
     
-    a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.highly_variable], n_comps=n_components, return_info=True)
+    a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.joint_highly_variable], n_comps=n_components, return_info=True)
 
-    df_var[f'{stage}'] = c*100
-    df_cumulative_var[f'{stage}'] = c.cumsum()*100
-
-
-# %%
-plt.plot(range(50), df_var, label=df_var.columns)
-plt.title('Variance explained')
-plt.legend()
-plt.yscale('log')
-plt.show()
-
-# %%
-plt.plot(df_cumulative_var.index, 100-df_cumulative_var, label=df_var.columns)
-plt.yscale('log')
-plt.title(f' 1- CDF variance explained')
-plt.legend()
-plt.show()
-
-# %%
-# %%time
-
-selected_cnmf_params = {
-    'E12': (16, 0.4),  # 
-    'E15': (18, 0.4),  # 
-    'E17': (15, 0.4),    # 
-    'P3': (16, 0.5),    # rank 16 has a split that improves loss and stability
-    'P7': (18, 0.4),   # 
-    'P15': (13, 0.4),  # 
-    'P42': (13, 0.4)}   # 
-
-split_adatas = {}
-
-for stage, (k, threshold) in selected_cnmf_params.items():
-    print(f'Working on {stage} with k={k} and threshold={threshold}')
-    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}.h5ad'))
-
-    c_object = cnmf.cNMF(cnmf_dir, stage)
-    c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
-                       nmf_refitting_iters=1000, show_clustering=False)
-
-    usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
-
-    tmp.uns['cnmf_params'] = {'k_nmf': k, 'threshold': threshold}
-
-    tmp.obsm['usages'] = usages.copy()
-
-    usages_norm = usages / np.sum(usages, axis=1, keepdims=True)
-    tmp.obsm['usages_norm'] = usages_norm
-
-    # get per gene z-score of data after TPM normalization and log1p transformation 
-    tpm_log1p_zscore = tmp.X.toarray()
-    tpm_log1p_zscore /= 1e-6 * np.sum(tpm_log1p_zscore, axis=1, keepdims=True)
-    tpm_log1p_zscore = np.log1p(tpm_log1p_zscore)
-    tpm_log1p_zscore = sc.pp.scale(tpm_log1p_zscore)
-
-    usage_coefs = _utils.fastols(usages_norm, tpm_log1p_zscore)
-
-    tmp.varm['usage_coefs'] = pd.DataFrame(
-        usage_coefs.T, index=tmp.var.index,
-        columns=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
-    
-    split_adatas[stage] = tmp
-
-    tmp.write_h5ad(split_adatas_dir.joinpath(f'{stage}_GEPs.h5ad'))
-
-
-# %% [markdown]
-# ### Examening results
-
-# %% Loading GEPs adatas
-# %%time
-
-split_adatas = {}
-for stage in stages:
-    split_adatas[stage] = sc.read_h5ad(split_adatas_dir.joinpath(f'{stage}_GEPs.h5ad'))
-
-# %%
-for stage in stages:
-    print(stage)
-    s = split_adatas[stage].obsm['usages_norm'].sum(axis=0)
-    with np.printoptions(precision=2, suppress=False):
-        print(s * 100 / s.sum())
-
-# %%
-# Plotting normalized usages clustermap
-for time in times:
-    tmp = split_adatas[time]
-    sname = tmp.uns["sname"]
-    k = tmp.obsm["usages"].shape[1]
-
-    un_sns = _utils.plot_usages_norm_clustermaps(tmp, show=True)
-    un_sns.savefig(results_dir.joinpath(
-        sname, f'{sname}.usages_norm.k_{k}.png'),
-        dpi=180, bbox_inches='tight')
-    plt.close(un_sns.fig)
-
-    _utils.plot_usages_norm_violin(
-        tmp, 'clusterK12', save_path=results_dir.joinpath(
-            sname, f'{sname}_norm_usage_per_lineage_k_{k}.png'))
-
-
-
-
-# %% [markdown]
-# ## ToDo - plot all programs on phate
-# ## ToDo - consider adding "main program" per cell and plot it on joint tsne and phate
-
-# %%
-for time in times:
-    tmp = split_adatas[time]
-    plt.scatter(tmp.obsm['X_phate'][:, 0], tmp.obsm['X_phate'][:, 1], c=tmp.obsm['usages_norm'][:, 0])
-    plt.title(f'{tmp.uns["name"]} Program 0 on Phate coordinates')
-    plt.show()
-    plt.close()
-
-# %%
-
-# sub-setting the genes:
-mutual_hvg = list(set().union(*[tmp.var[tmp.var.highly_variable].index \
-                          for time, tmp in split_adatas.items()]))
-mutual_hvg = list(set(mutual_hvg).intersection(*[tmp.var[tmp.var.highly_variable].index \
-                          for time, tmp in split_adatas.items()]))
-# mutual_hvg = adata.var[adata.var.highly_variable].index
-
-concatenated_spectras = pd.concat([
-    tmp.varm['usage_coefs'].loc[mutual_hvg].copy() for time, tmp in split_adatas.items()], axis=1)
-
-n_genes, n_programs = concatenated_spectras.shape
-
-pearson_corr = np.corrcoef(concatenated_spectras.T)
-
-# cosine figure
-fig, ax = plt.subplots(figsize=(4 + n_programs * 0.43, 4 + n_programs * 0.41))
-
-_utils.heatmap_with_numbers(
-    pearson_corr, ax=ax, param_dict={'vmin': 0, 'vmax': 1})
-
-ax.xaxis.tick_bottom()
-ax.set_xticklabels(concatenated_spectras.columns, rotation='vertical')
-ax.set_yticklabels(concatenated_spectras.columns)
-ax.set_title('Pearson correlation',
-             size=25, y=1.05, x=0.43)
-
-fig.savefig(results_dir.joinpath('correlation_pearson.png'),
-            dpi=180, bbox_inches='tight')
-plt.close(fig)
-
-
-# correlation histogram
-fig, ax = plt.subplots(figsize=(6, 5))
-
-plt.hist(pearson_corr[np.triu_indices_from(pearson_corr, k=1)],
-         bins=np.linspace(-1, 1, 41))
-ax.set_title('Pearson correlation distribution')
-plt.show()
-
-fig.savefig(results_dir.joinpath('correlation_histogtam_pearson.png'),
-            dpi=180, bbox_inches='tight')
-
-plt.close(fig)
-
-# 3.1b Calculating spearman correlation between usages coefficient
-
-from scipy.stats import rankdata
-N_COMPARED_RANKED = 1000
-
-ranked_coefs = n_genes - rankdata(concatenated_spectras, axis=0)
-
-ranked_coefs[ranked_coefs > N_COMPARED_RANKED] = N_COMPARED_RANKED
-
-spearman_corr = np.corrcoef(ranked_coefs, rowvar=False)
-
-# spearman figure
-fig, ax = plt.subplots(figsize=(4 + ranked_coefs.shape[1] * 0.43,
-                                4 + ranked_coefs.shape[1] * 0.41))
-
-_utils.heatmap_with_numbers(
-    spearman_corr, ax=ax, param_dict={'vmin': 0, 'vmax': 1})
-
-ax.xaxis.tick_bottom()
-ax.set_xticklabels(concatenated_spectras.columns, rotation='vertical')
-ax.set_yticklabels(concatenated_spectras.columns)
-ax.set_title(f'{N_COMPARED_RANKED}-Truncated Spearman Correlation',
-             size=25, y=1.05, x=0.43)
-
-fig.savefig(results_dir.joinpath(
-    f'correlation_spearman_{N_COMPARED_RANKED}_truncated.png'),
-    dpi=180, bbox_inches='tight')
-
-plt.close(fig)
-
-# correlation histogram
-fig, ax = plt.subplots(figsize=(6, 5))
-
-plt.hist(spearman_corr[np.triu_indices_from(spearman_corr, k=1)],
-         bins=np.linspace(0, 1, 21))
-ax.set_title('Spearman Correlation distribution')
-plt.show()
-
-fig.savefig(results_dir.joinpath(
-    f'correlation_histogtam_spearman_{N_COMPARED_RANKED}_truncated.png'),
-    dpi=180, bbox_inches='tight')
-
-plt.close(fig)
-
-# %%
-
-import matplotlib as mpl
-import networkx as nx
-from scipy.cluster import hierarchy
-
-threshold = 0.2
-
-# maping adata short name to layer number
-name_map = {}
-for i, time in enumerate(times):
-    name_map['t'+time[:2]] = i + 1
-
-ks = [tmp.obsm['usages_norm'].shape[1] for time, tmp in split_adatas.items()]
-
-# adjacency matrix creation and filtering
-
-adj_df = pd.DataFrame(np.round((spearman_corr + pearson_corr) / 2, 2),
-                      index=concatenated_spectras.columns,
-                      columns=concatenated_spectras.columns)
-
-# order
-linkage = hierarchy.linkage(
-    adj_df, method='average', metric='euclidean')
-prog_order = hierarchy.leaves_list(
-    hierarchy.optimal_leaf_ordering(linkage, adj_df))
-
-np.fill_diagonal(adj_df.values, 0)
-# adj_df.values[adj_df.values <= 0.0] = 0
-
-# keeping only edges between consecutive layers
-for i in range(len(ks) - 2):
-    adj_df.values[:np.sum(ks[:i + 1]), np.sum(ks[:i + 2]):] = 0
-    adj_df.values[np.sum(ks[:i + 2]):, :np.sum(ks[:i + 1])] = 0
-
-adj_df.values[adj_df.values <= threshold] = 0
-print(f'Number of edges={np.count_nonzero(adj_df)}')
-
-# ordering the nodes for display
-adj_df = adj_df.iloc[prog_order, prog_order]
-
-# create the graph object
-G = nx.from_numpy_array(adj_df.values, create_using=nx.Graph)
-nx.relabel_nodes(G, lambda i: adj_df.index[i], copy=False)
-nx.set_node_attributes(
-    G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
-
-# prepare graph for display
-layout = nx.multipartite_layout(G, subset_key='layer')
-
-edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
-edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
-
-for layer in {data['layer'] for key, data in G.nodes.data()}:
-    nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
-
-    angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
-
-    for i, node in enumerate(nodes):
-        layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
-
-fig, ax = plt.subplots(1, 1, figsize=(16.4, 19.2), dpi=180)
-nx.draw(G, layout, node_size=1500, with_labels=False, edge_color=weights,
-        edge_vmin=threshold, edge_vmax=1., width=edge_width, ax=ax)
-
-cmp = mpl.cm.ScalarMappable(mpl.colors.Normalize(vmin=threshold, vmax=1))
-plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(15, 5, 71))
-
-# change color of layers
-for time, tmp in split_adatas.items():
-    nx.draw_networkx_nodes(
-        G, layout, node_color=adata.uns['timesimple_colors_dict'][time],
-        node_size=1400, nodelist=[f'{tmp.uns["sname"]}.p{i}' for i in range(
-            tmp.obsm['usages'].shape[1])], ax=ax)
-nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
-
-ax.set_title(f'Timepoint correlation graph, correlation threshold={threshold}',
-             {'fontsize': 25})
-plt.show()
-
-
-fig.savefig(results_dir.joinpath(
-    f'correlations_graph_threshold_{threshold}.png'),
-    dpi=180, bbox_inches='tight')
-
-plt.close()
-
-del name_map, G, edges, weights, i, layer, angles, node, nodes
-del fig, ax, layout, prog_order
-
-
-# %% [markdown]
-# # Epithelial compartment decomposition
-
-# %% [markdown]
-# ### Splitting the adata by "development_stage", retaining only epithelial cells and creating a normalized variance layer
-
-# %%
-# %%time
-
-stages = adata.obs.development_stage.cat.categories
-epi_split_adatas_dir = _utils.set_dir(results_dir.joinpath('epi_split_adatas'))
-
-for stage in stages:
-    print(f'working on stage {stage}')
-    file = epi_split_adatas_dir.joinpath(f'epi_{stage}.h5ad')
-    
-    if not file.exists():
-        tmp = adata[adata.obs.development_stage == stage]
-        tmp = tmp[(tmp.obs.compartment == 'epi') & (tmp.obs.celltype != 'unknown3')].copy()
-                
-        tmp.uns['name'] = f'Epi {stage}'   # full name
-        tmp.uns['sname'] = f'{stage}'  # short name, here it is the same
-
-        # correcting the gene counts
-        sc.pp.filter_genes(tmp, min_cells=0)
-        sc.pp.filter_genes(tmp, min_counts=0)
-
-        # calculating per sample HVGs
-        sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
-
-        tmp.write_h5ad(file)
-
-        del tmp
-
-
-# %% [markdown]
-# ### Running multiple NMF iterations
-
-# %%
-# %%time
-
-cnmf_dir = _utils.set_dir(results_dir.joinpath('epi_cnmf'))
-
-ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-
-for stage in stages:
-    print(f'Starting on epithelial {stage}, time is {time.strftime("%H:%M:%S", time.localtime())}')
-    tmp = sc.read_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}.h5ad'))
-    
-    c_object = cnmf.cNMF(cnmf_dir, stage)
-    
-    # Variance normalized version of the data
-    X = sc.pp.scale(tmp.X[:, tmp.var.highly_variable].toarray().astype(np.float32), zero_center=False)
-    
-    c_object.prepare(X, ks, n_iter=100, new_nmf_kwargs={'tol': _constants.NMF_TOLERANCE,
-                                                        'beta_loss': 'kullback-leibler'})
-    
-    c_object.factorize(0, 1, gpu=True)
-    
-    c_object.combine()
-    
-    del tmp, X
-    
-
-
-# %%
-# %%time
-for stage in stages:
-    print(f'Starting on {stage}, time is {time.strftime("%H:%M:%S", time.localtime())}')
-    c_object = cnmf.cNMF(cnmf_dir, stage)
-    for thresh in [0.5, 0.4, 0.3]:
-        print(f'working on threshold {thresh}')
-        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
-                                  close_fig=True, show_clustering=True, gpu=True)
-
-    
-
-
-# %% [markdown]
-# ### Selecting the decomposition rank utilizing K-selection plots and PCA variance explained
-
-# %%
-# %%time
-df_var = pd.DataFrame()
-df_cumulative_var = pd.DataFrame()
-
-n_components = 30
-
-for stage in stages:
-    
-    # %time tmp = sc.read_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}.h5ad'))
-    
-    a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.highly_variable], n_comps=n_components, return_info=True)
-
-    df_var[f'{stage}'] = c*100
-    df_cumulative_var[f'{stage}'] = c.cumsum()*100
+    df_var[f'{cat}'] = c*100
+    df_cumulative_var[f'{cat}'] = c.cumsum()*100
 
 
 # %%
 plt.plot(range(len(df_var)), df_var, label=df_var.columns)
-plt.title('Variance explained')
+plt.title('Variance explained - jointly highly variable genes')
 plt.legend()
 plt.yscale('log')
 plt.show()
@@ -637,7 +304,7 @@ plt.show()
 # %%
 plt.plot(df_cumulative_var.index, 100-df_cumulative_var, label=df_var.columns)
 plt.yscale('log')
-plt.title(f' 1- CDF variance explained')
+plt.title(f' 1- CDF variance explained joint highly variable')
 plt.legend()
 plt.show()
 
@@ -645,21 +312,23 @@ plt.show()
 # %%time
 
 selected_cnmf_params = {
-    'E12': (7, 0.5),  # 
-    'E15': (8, 0.5),  # 
-    'E17': (10, 0.5),   # 
-    'P3': (9, 0.5),    # 
-    'P7': (8, 0.5),   # 
-    'P15': (5, 0.5),  # 
+    'E12': (4, 0.5),  # 
+    'E15': (5, 0.5),  # 
+    'E17': (8, 0.5),   # 
+    'P3': (6, 0.5),    # 
+    'P7': (6, 0.5),   # 
+    'P15': (4, 0.5),  # 
     'P42': (5, 0.5)}   # 
 
-epi_split_adatas = {}
+split_adatas = {}
 
-for stage, (k, threshold) in selected_cnmf_params.items():
-    print(f'Working on epi {stage} with k={k} and threshold={threshold}')
-    # %time tmp = sc.read_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}.h5ad'))
+for cat, (k, threshold) in selected_cnmf_params.items():
+    print(f'Working on epi {cat} with k={k} and threshold={threshold}')
+    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
-    c_object = cnmf.cNMF(cnmf_dir, stage)
+    tmp.var.joint_highly_variable = subset.var.joint_highly_variable
+    
+    c_object = cnmf.cNMF(cnmf_dir, cat)
     c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
                        nmf_refitting_iters=1000, show_clustering=False)
 
@@ -684,38 +353,100 @@ for stage, (k, threshold) in selected_cnmf_params.items():
         usage_coefs.T, index=tmp.var.index,
         columns=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
     
-    epi_split_adatas[stage] = tmp
+    split_adatas[cat] = tmp
 
-    tmp.write_h5ad(epi_split_adatas_dir.joinpath(f'epi_{stage}_GEPs.h5ad'))
+    tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
+
+# %% [markdown]
+# ### Examining results
 
 # %%
-epidata.obsm_keys()
+# %%time
+
+split_adatas = {}
+for cat in categories:
+    split_adatas[cat] = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
 # %%
-stages = ['E12', 'E15', 'E17', 'P3', 'P7', 'P15', 'P42']
-decomposition_images = _utils.set_dir(results_dir.joinpath("epi_split_adatas", "images"))
+for cat in categories:
+    print(cat)
+    s = split_adatas[cat].obsm['usages_norm'].sum(axis=0)
+    with np.printoptions(precision=2, suppress=False):
+        print(s * 100 / s.sum())
 
+# %%
+decomposition_images = _utils.set_dir(split_adatas_dir.joinpath("images"))
 
-for stage in stages:
-    epidata = sc.read_h5ad(results_dir.joinpath("epi_split_adatas", f"epi_{stage}_GEPs.h5ad"))
+for cat in categories:
+    epidata = sc.read_h5ad(split_adatas_dir.joinpath(f"{cat}.h5ad"))
     
     # UMAP
-    um = sc.pl.umap(epidata, color='celltype', s=10, return_fig=True, title=f'{stage} epithelial')
+    um = sc.pl.umap(epidata, color='celltype', s=10, return_fig=True, title=f'{cat} epithelial')
     plt.tight_layout()
-    um.savefig(decomposition_images.joinpath(f"epi_{stage}_umap_celltype.png"), dpi=300)
+    um.savefig(decomposition_images.joinpath(f"epi_{cat}_umap_celltype.png"), dpi=300)
     plt.close(um)
 
     # usages clustermap
     un_sns = _utils.plot_usages_norm_clustermaps(
-        epidata, title=f'{stage}', show=False,sns_clustermap_params={
+        epidata, title=f'{cat}', show=False,sns_clustermap_params={
             'row_colors': epidata.obs['celltype'].map(epidata.uns['celltype_colors_dict'])})
-    un_sns.savefig(decomposition_images.joinpath(f"epi_{stage}_usages_norm.png"),
+    un_sns.savefig(decomposition_images.joinpath(f"{cat}_usages_norm.png"),
                    dpi=180, bbox_inches='tight')
     plt.close(un_sns.fig)
 
     # usages violin plot
     _utils.plot_usages_norm_violin(
         epidata, 'celltype', save_path=decomposition_images.joinpath(
-            f'epi_{stage}_norm_usage_per_lineage.png'))
+            f'{cat}_norm_usage_per_lineage.png'))
 
+
+# %% [markdown]
+# ## 5. Running comparator on the data
+
+# %%
+for cat in categories:
+    tmp = split_adatas[cat]
+
+    field_1 = 'celltype'
+
+    tmp.obsm['row_colors'] = pd.concat([
+        tmp.obs[field_1].map(tmp.uns[f'{field_1}_colors_dict']),
+        ], axis=1)
+
+# %%
+# %%time
+
+pairs = [(categories[i], categories[i + 1]) for i in range(len(categories) - 1)]
+
+for cat_a, cat_b in pairs:
+    comparison_dir = _utils.set_dir(results_dir.joinpath(f"same_genes_{cat_a}_{cat_b}"))
+    
+    adata_a = split_adatas[cat_a]
+    adata_b = split_adatas[cat_b]
+    
+    if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+        cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    else:
+        cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir,
+                                    'torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
+                                   highly_variable_genes='joint_highly_variable')
+        
+        print('decomposing')
+        cmp.extract_geps_on_jointly_hvgs()
+        cmp.decompose_b(repeats = 5)
+    
+    cmp.examine_adata_a_decomposition_on_jointly_hvgs()
+    
+    cmp.print_errors()
+    cmp.examine_adata_b_decompositions()
+    cmp.plot_decomposition_comparisons()
+    
+    cmp.calculate_fingerprints()
+    
+    print('running GSEA')
+    cmp.run_gsea(gprofiler_kwargs=dict(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
+
+    cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
+
+    

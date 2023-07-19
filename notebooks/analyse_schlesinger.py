@@ -266,7 +266,7 @@ subset_adata_file = results_dir.joinpath('subset.h5ad')
 if not subset_adata_file.exists():
     subset = adata[adata.obs.ident.isin(['0', '4', '9', '15', '17', '18'])].copy()
 
-    # Removing genes that were probably miss-labeled:
+    # Removing cells that were probably miss-labeled:
     subset = subset[subset.obsp['connectivities'].sum(axis=1)>=2.1]
 
     sc.pp.filter_genes(subset, min_cells=0)
@@ -283,7 +283,7 @@ sc.pl.umap(subset, color=['time_point', 'ident'])
 
 
 # %% [markdown]
-# ### Splitting the adata by "time_point", and creating a normalized variance layer
+# ### Splitting the adata by "time_point"
 
 # %%
 # %%time
