@@ -915,8 +915,8 @@ class cNMF():
 
     def k_selection_plot(self, close_fig=False, show_clustering=False, 
                          density_threshold=0.5, local_neighborhood_size=0.30,
-                         nmf_refitting_iters=100, gpu=False, device='cuda',
-                         verbose=False):
+                         nmf_refitting_iters=100, consensus_method='median',
+                         gpu=False, device='cuda', verbose=False):
         '''
         Borrowed from Alexandrov Et Al. 2013 Deciphering Mutational Signatures
         publication in Cell Reports
@@ -928,6 +928,7 @@ class cNMF():
                 stats.append(self.consensus(
                     k, density_threshold=density_threshold,
                     local_neighborhood_size=local_neighborhood_size,
+                    consensus_method=consensus_method,
                     skip_density_and_return_after_stats=True,
                     show_clustering=show_clustering,
                     close_clustergram_fig=True,
