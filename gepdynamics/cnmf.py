@@ -619,7 +619,7 @@ class cNMF():
 
     def consensus(self, k_source, k_clusters=None, density_threshold=0.5,
                   local_neighborhood_size=0.30, show_clustering=True,
-                  close_clustergram_fig=False, 
+                  close_clustergram_fig=False, consensus_method='median',
                   skip_density_and_return_after_stats=False,
                   nmf_refitting_iters: int=None, gpu=False, device='cuda',
                   verbose=False):
@@ -704,13 +704,19 @@ class cNMF():
                 'silhouette', ascending=False).index,
             range(1, k_clusters + 1))))
         
-        # Find median usage for each gene across cluster
-        median_spectra = l2_spectra.groupby(kmeans_clusters.label).median()
-        median_spectra[median_spectra < EPSILON] = 0
+        # Find representative usage for each gene across cluster
+        if consensus_method == 'median':
+            consensus_spectra = l2_spectra.groupby(kmeans_clusters.label).median()
+        elif consensus_method == 'mean':
+            consensus_spectra = l2_spectra.groupby(kmeans_clusters.label).mean()
+        else:
+            raise ValueError('consensus_method must be "median" or "mean"')
+
+        consensus_spectra[consensus_spectra < EPSILON] = 0
 
         # Normalize median spectra to probability distributions.
-        row_norm = np.linalg.norm(median_spectra, ord=1, axis=1)
-        median_spectra = median_spectra / row_norm[:, None]
+        row_norm = np.linalg.norm(consensus_spectra, ord=1, axis=1)
+        consensus_spectra = consensus_spectra / row_norm[:, None]
 
         # Compute the silhouette score
         stability = silhouette_score(
@@ -728,7 +734,7 @@ class cNMF():
         
         refit_nmf_kwargs.update(dict(
             n_components=k_clusters,
-            H=median_spectra.values,
+            H=consensus_spectra.values,
             update_H=False))
         
         if gpu:
@@ -747,7 +753,7 @@ class cNMF():
                 print('Refitting W, H based on consensus')
                 
             refit_nmf_kwargs.update(dict(
-                H=median_spectra.values.copy(),
+                H=consensus_spectra.values.copy(),
                 W=rf_usages.copy(),
                 init='custom',
                 max_iter=nmf_refitting_iters,
@@ -766,17 +772,17 @@ class cNMF():
             
             # L1 normalize the spectra
             rownorm = np.linalg.norm(rf_spec, ord=1, axis=1)
-            median_spectra[:] = rf_spec / (rownorm[:, None])
+            consensus_spectra[:] = rf_spec / (rownorm[:, None])
             rf_usages = rf_usages * (rownorm[None, :])
         
         rf_usages = pd.DataFrame(
-            rf_usages, columns=median_spectra.index)
+            rf_usages, columns=consensus_spectra.index)
         
-        # rf_pred_norm_counts = rf_usages.dot(median_spectra)
+        # rf_pred_norm_counts = rf_usages.dot(consensus_spectra)
 
-        # Compute prediction error as a the loss
+        # Compute prediction error as the loss
         prediction_error = sknmf._beta_divergence(
-            self.X, rf_usages, median_spectra,
+            self.X, rf_usages, consensus_spectra,
             sknmf._beta_loss_to_float(refit_nmf_kwargs['beta_loss']))
         
         consensus_stats = pd.DataFrame(
@@ -786,13 +792,13 @@ class cNMF():
                    'stability', 'prediction_error'])
 
         if not skip_density_and_return_after_stats:
-            save_df_to_npz(median_spectra, self.paths['consensus_spectra'] % (
+            save_df_to_npz(consensus_spectra, self.paths['consensus_spectra'] % (
                 k_source, k_clusters, density_threshold_str))
             save_df_to_npz(rf_usages, self.paths['consensus_usages'] % (
                 k_source, k_clusters, density_threshold_str))
             save_df_to_npz(consensus_stats, self.paths['consensus_stats'] % (
                 k_source, k_clusters, density_threshold_str))
-            save_df_to_tsv(median_spectra, self.paths['consensus_spectra__txt']
+            save_df_to_tsv(consensus_spectra, self.paths['consensus_spectra__txt']
                            % (k_source, k_clusters, density_threshold_str))
             save_df_to_tsv(rf_usages, self.paths['consensus_usages__txt'] % (
                 k_source, k_clusters, density_threshold_str))

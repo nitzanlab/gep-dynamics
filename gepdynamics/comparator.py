@@ -529,7 +529,9 @@ class Comparator(object):
 
         self.stage = Stage.PREPARED
 
-    def examine_adata_a_decomposition_on_jointly_hvgs(self, show: bool = False, save: bool = True):
+    def examine_adata_a_decomposition_on_jointly_hvgs(self, hist_bins: int = 25,
+                                                      hist_max_value: float = 2500,
+                                                      show: bool = False, save: bool = True):
         """
         Examine the decomposition of A on jointly HVGs
         """
@@ -547,7 +549,8 @@ class Comparator(object):
                 f"original GEPs, k={res.rank}"
 
         row_colors = _utils.expand_adata_row_colors(self.adata_a, pd.Series(
-            _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=1200),
+            _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=(
+                2 * np.median(res.loss_per_cell))),
             name='residual', index=self.adata_a.obs.index))
 
         col_labels = res.prog_labels_2l if res.rank < 20 else res.prog_labels_1l
@@ -563,7 +566,7 @@ class Comparator(object):
         plt.close()
 
         # loss per cell histogram
-        plt.hist(res.loss_per_cell, bins=25, range=(0, min(2500, res.loss_per_cell.max())))
+        plt.hist(res.loss_per_cell, bins=hist_bins, range=(0, min(hist_max_value, res.loss_per_cell.max())))
         plt.title(f'{res.name} loss per cell distribution')
 
         if save:
@@ -837,7 +840,8 @@ class Comparator(object):
                         f"{res.rank - self.rank_a} novel GEPs"
 
             row_colors = _utils.expand_adata_row_colors(self.adata_b, pd.Series(
-                _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=1200),
+                _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=(
+                2 * np.median(res.loss_per_cell))),
                 name='residual', index=self.adata_b.obs.index))
 
             col_labels = res.prog_labels_2l if res.rank < 20 else res.prog_labels_1l
