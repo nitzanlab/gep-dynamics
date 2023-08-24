@@ -101,6 +101,99 @@ def var_sparse_matrix(X):
     return var
 
 
+def find_knee_point(y, x=None):
+    """
+    Returns the x-location of a (single) knee or elbow of curve y=f(x).
+
+    Code logic - per break-point, fit a line to the first half and second half
+    of the data using least-squares, calculate the sum of absolute error of the
+    fits per break-point, and select the minimum-error breakpoint.
+
+    Code from github.com/KrishnaswamyLab/PHATE/
+
+    Parameters
+    ----------
+
+    y : array, shape=[n]
+        data for which to find the knee point
+
+    x : array, optional, shape=[n], default=np.arange(len(y))
+        indices of the data points of y,
+        if these are not in order and evenly spaced
+
+    Returns
+    -------
+    knee_point : int
+    The index (or x value) of the knee point on y
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from gepdynamics.cnmf import find_knee_point
+    >>> x = np.arange(20)
+    >>> y = np.exp(-x/10)
+    >>> find_knee_point(y,x)
+    8
+
+    """
+    try:
+        y.shape
+    except AttributeError:
+        y = np.array(y)
+
+    if len(y) < 3:
+        raise ValueError("Cannot find knee point on vector of length 3")
+    elif len(y.shape) > 1:
+        raise ValueError("y must be 1-dimensional")
+
+    if x is None:
+        x = np.arange(len(y))
+    else:
+        try:
+            x.shape
+        except AttributeError:
+            x = np.array(x)
+        if not x.shape == y.shape:
+            raise ValueError("x and y must be the same shape")
+        else:
+            # ensure x is sorted float
+            idx = np.argsort(x)
+            x = x[idx]
+            y = y[idx]
+
+    n = np.arange(2, len(y) + 1).astype(np.float32)
+    # figure out the m and b (in the y=mx+b sense) for the "left-of-knee"
+    sigma_xy = np.cumsum(x * y)[1:]
+    sigma_x = np.cumsum(x)[1:]
+    sigma_y = np.cumsum(y)[1:]
+    sigma_xx = np.cumsum(x * x)[1:]
+    det = n * sigma_xx - sigma_x * sigma_x
+    mfwd = (n * sigma_xy - sigma_x * sigma_y) / det
+    bfwd = -(sigma_x * sigma_xy - sigma_xx * sigma_y) / det
+
+    # figure out the m and b (in the y=mx+b sense) for the "right-of-knee"
+    sigma_xy = np.cumsum(x[::-1] * y[::-1])[1:]
+    sigma_x = np.cumsum(x[::-1])[1:]
+    sigma_y = np.cumsum(y[::-1])[1:]
+    sigma_xx = np.cumsum(x[::-1] * x[::-1])[1:]
+    det = n * sigma_xx - sigma_x * sigma_x
+    mbck = ((n * sigma_xy - sigma_x * sigma_y) / det)[::-1]
+    bbck = (-(sigma_x * sigma_xy - sigma_xx * sigma_y) / det)[::-1]
+
+    # figure out the sum of per-point absolute-errors for left- and right- of-knee fits
+    error_curve = np.full_like(y, np.nan)
+    for pt in np.arange(1, len(y) - 1):
+        delsfwd = (mfwd[pt - 1] * x[: pt + 1] + bfwd[pt - 1]) - y[: pt + 1]
+        delsbck = (mbck[pt - 1] * x[pt:] + bbck[pt - 1]) - y[pt:]
+
+        error_curve[pt] = np.abs(delsfwd).sum() + np.abs(delsbck).sum()
+
+    # find location of the min of the error curve
+    loc = np.argmin(error_curve[1:-1]) + 1
+    knee_point = x[loc]
+    return knee_point
+
+
 def _nmf_torch_translate_kwargs(X, nmf_kwargs):
     '''
     Translating keyword arguments to match torch-NMF requirements,
