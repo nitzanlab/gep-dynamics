@@ -1035,6 +1035,10 @@ class cNMF():
                          nmf_refitting_iters=100, consensus_method='median',
                          gpu=False, device='cuda', verbose=False):
         '''
+        Plotting the reconstruction error and stability (silhouette) per rank k.
+
+        If more than 4 ks are plotted, also calculates the elbow point.
+
         Borrowed from Alexandrov Et Al. 2013 Deciphering Mutational Signatures
         publication in Cell Reports
         '''
