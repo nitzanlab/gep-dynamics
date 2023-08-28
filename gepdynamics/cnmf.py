@@ -1075,7 +1075,7 @@ class cNMF():
             knee_point = None
 
         density_str = self.convert_dt_to_str(density_threshold)
-        save_df_to_npz(stats, self.paths['k_selection_stats_dt' % density_str])
+        save_df_to_npz(stats, self.paths['k_selection_stats_dt'] % density_str)
 
         fig = plt.figure(figsize=(6, 4))
         ax1 = fig.add_subplot(111)
