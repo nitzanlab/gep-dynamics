@@ -1048,6 +1048,8 @@ class cNMF():
         run_params = load_df_from_npz(self.paths['nmf_replicate_parameters'])
         stats = []
         for k in sorted(set(run_params.n_components)):
+            if verbose:
+                print(f'Calculating consensus for k={k}')
             try:
                 stats.append(self.consensus(
                     k, density_threshold=density_threshold,
@@ -1070,7 +1072,7 @@ class cNMF():
 
         # Finding the knee point of the prediction error curve
         if len(stats) > 3:
-            knee_point = find_knee_point(stats.prediction_error, stats.k_source)
+            knee_point = find_knee_point(stats.prediction_error)
         else:
             knee_point = None
 
