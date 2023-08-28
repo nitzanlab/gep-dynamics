@@ -101,7 +101,7 @@ def var_sparse_matrix(X):
     return var
 
 
-def find_knee_point(y, x=None):
+def find_knee_point(y, x=None, return_errors: bool = False):
     """
     Returns the x-location of a (single) knee or elbow of curve y=f(x).
 
@@ -115,16 +115,24 @@ def find_knee_point(y, x=None):
     ----------
 
     y : array, shape=[n]
-        data for which to find the knee point
+        data for which to find the knee point. length must be at least 3.
 
     x : array, optional, shape=[n], default=np.arange(len(y))
         indices of the data points of y,
         if these are not in order and evenly spaced
 
+    return_errors : bool, optional, default=False
+        if True, return a tuple of the knee point and errors per point
+
     Returns
     -------
     knee_point : int
     The index (or x value) of the knee point on y
+
+    If return_errors is True:
+    knee_point_errors : tuple
+        A tuple containing the knee point and a NumPy array of error values for each
+        potential knee point.
 
     Examples
     --------
@@ -132,12 +140,22 @@ def find_knee_point(y, x=None):
     >>> from gepdynamics.cnmf import find_knee_point
     >>> x = np.arange(20)
     >>> y = np.exp(-x/10)
-    >>> find_knee_point(y,x)
+    >>> find_knee_point(y, x)
     8
+
+    >>> knee_point, errors = find_knee_point(y, x, return_errors=True)
+    >>> knee_point
+    8
+    >>> errors
+    array([...])  # NumPy array containing error values for each potential knee point
+
 
     """
     try:
         y.shape
+        # if y is a pandas series, convert to numpy array
+        if isinstance(y, pd.Series):
+            y = y.values
     except AttributeError:
         y = np.array(y)
 
@@ -191,7 +209,11 @@ def find_knee_point(y, x=None):
     # find location of the min of the error curve
     loc = np.argmin(error_curve[1:-1]) + 1
     knee_point = x[loc]
-    return knee_point
+
+    if return_errors:
+        return knee_point, error_curve
+    else:
+        return knee_point
 
 
 def _nmf_torch_translate_kwargs(X, nmf_kwargs):
@@ -426,8 +448,10 @@ class cNMF():
                 run_dir, self.name + '.k_selection.dt_%s.png'),
             'k_selection_stats': os.path.join(
                 run_dir, self.name + '.k_selection_stats.df.npz'),
+            'k_selection_stats_dt': os.path.join(
+                run_dir, self.name + '.k_selection_stats.dt_%s.df.npz'),
         }
-        
+
     def _initialize_gpu(self, device='cuda'):
         if hasattr(self, 'device'):  # if environment was set for gpu usage
             return
@@ -1037,26 +1061,38 @@ class cNMF():
         stats = pd.DataFrame(stats)
         stats.reset_index(drop=True, inplace=True)
 
-        save_df_to_npz(stats, self.paths['k_selection_stats'])
+        # Finding the knee point of the prediction error curve
+        if len(stats) > 3:
+            knee_point = find_knee_point(stats.prediction_error, stats.source_k)
+        else:
+            knee_point = None
+
+        density_str = self.convert_dt_to_str(density_threshold)
+        save_df_to_npz(stats, self.paths['k_selection_stats_dt' % density_str])
 
         fig = plt.figure(figsize=(6, 4))
         ax1 = fig.add_subplot(111)
         ax2 = ax1.twinx()
 
         ax1.plot(stats.k_source, stats.stability, 'o-', color='b')
-        ax1.set_ylabel('Stability', color='b', fontsize=15)
+        ax1.set_ylabel('Stability', color='b', fontsize=14)
         for tl in ax1.get_yticklabels():
             tl.set_color('b')
 
         ax2.plot(stats.k_source, stats.prediction_error, 'o-', color='r')
-        ax2.set_ylabel('Error', color='r', fontsize=15)
+        ax2.set_ylabel('Reconstruction error', color='r', fontsize=14)
         for tl in ax2.get_yticklabels():
             tl.set_color('r')
 
-        ax1.set_xlabel('Number of Components', fontsize=15)
+        if knee_point is not None:
+            # Plot a purple star at the knee point
+            ax2.plot(stats.k_source[knee_point],
+                     stats.prediction_error[knee_point],
+                     marker='*', color='purple', markersize=12)
+
+        ax1.set_xlabel('Number of Components', fontsize=14)
         ax1.grid('on')
-        
-        density_str = self.convert_dt_to_str(density_threshold)
+
         ax1.set_title('k-selection assisting plot\n'
                       f'threshold={density_threshold:.2f},'
                       f' neighbors proportion={local_neighborhood_size}',
