@@ -1067,7 +1067,7 @@ class cNMF():
 
         # Finding the knee point of the prediction error curve
         if len(stats) > 3:
-            knee_point = find_knee_point(stats.prediction_error, stats.source_k)
+            knee_point = find_knee_point(stats.prediction_error, stats.k_source)
         else:
             knee_point = None
 
