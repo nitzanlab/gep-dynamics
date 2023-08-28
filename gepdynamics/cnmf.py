@@ -169,6 +169,9 @@ def find_knee_point(y, x=None, return_errors: bool = False):
     else:
         try:
             x.shape
+            # if x is a pandas series, convert to numpy array
+            if isinstance(x, pd.Series):
+                x = x.values
         except AttributeError:
             x = np.array(x)
         if not x.shape == y.shape:
