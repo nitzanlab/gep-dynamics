@@ -183,6 +183,7 @@ adata
 column_of_interest = 'development_stage'
 
 subset_adata_file = results_dir.joinpath('subset.h5ad')
+
 if not subset_adata_file.exists():
     subset = adata[(adata.obs.compartment == 'epi') & (adata.obs.celltype != 'unknown3')].copy()
 
@@ -236,7 +237,7 @@ for cat in categories:
         del tmp
 
 # %% [markdown]
-# ### Running multiple NMF iterations
+# ## 4. Running consensus NMF iterations
 
 # %%
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
@@ -269,13 +270,20 @@ for cat in categories:
 for cat in categories:
     print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
     c_object = cnmf.cNMF(cnmf_dir, cat)
-    for thresh in [0.5, 0.4]:
+    for thresh in [0.5, 0.4, 0.3]:
         print(f'working on threshold {thresh}')
-        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=1000,
+        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=1000, 
+                                  consensus_method='mean',
                                   close_fig=True, show_clustering=True, gpu=True)
+        # printing the selected knee point
+        df = cnmf.load_df_from_npz(c_object.paths['k_selection_stats_dt'] % c_object.convert_dt_to_str(thresh))
+        pos = len(df) - 5
+        for i in range(5):
+            print(cnmf.find_knee_point(df.prediction_error[:pos + i], df.k_source[:pos + i]), end=", ")
+        print()
 
 # %% [markdown]
-# ### Selecting the decomposition rank utilizing K-selection plots and PCA variance explained
+# ## 5. Selecting decomposition rank for cNMF utilizing K-selection plots and PCA variance explained
 
 # %%
 # %%time
@@ -309,13 +317,26 @@ plt.legend()
 plt.show()
 
 # %%
+thresh = 0.5
+
+for cat in categories:
+    print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
+    c_object = cnmf.cNMF(cnmf_dir, cat)
+
+    df = cnmf.load_df_from_npz(c_object.paths['k_selection_stats_dt'] % c_object.convert_dt_to_str(thresh))
+    pos = len(df) - 5
+    for i in range(5):
+        print(cnmf.find_knee_point(df.prediction_error[:pos + i], df.k_source[:pos + i]), end=", ")
+    print()
+
+# %%
 # %%time
 
 selected_cnmf_params = {
-    'E12': (4, 0.5),  # 
-    'E15': (5, 0.5),  # 
-    'E17': (8, 0.5),   # 
-    'P3': (6, 0.5),    # 
+    'E12': (6, 0.5),  # 
+    'E15': (7, 0.5),  # 
+    'E17': (5, 0.5),   # 
+    'P3': (5, 0.5),    # 
     'P7': (6, 0.5),   # 
     'P15': (4, 0.5),  # 
     'P42': (5, 0.5)}   # 
@@ -402,7 +423,23 @@ for cat in categories:
 
 
 # %% [markdown]
-# ## 5. Running comparator on the data
+# ## 6. Running comparator on the data
+
+# %%
+# %%time
+
+column_of_interest = 'development_stage'
+categories = ['E12', 'E15', 'E17', 'P3', 'P7', 'P15', 'P42']
+
+results_dir = _utils.set_dir('results')
+results_dir = _utils.set_dir(results_dir.joinpath('zepp'))
+
+split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
+
+
+split_adatas = {}
+for cat in categories:
+    split_adatas[cat] = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
 # %%
 for cat in categories:
@@ -449,4 +486,6 @@ for cat_a, cat_b in pairs:
 
     cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
 
-    
+
+
+# %%
