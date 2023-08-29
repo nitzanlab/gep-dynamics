@@ -92,7 +92,13 @@ def truncated_spearmans_correlation(data, truncation_level: int = 1000,
 def joint_hvg_across_stages(adata: sc.AnnData, obs_category_key: str, n_top_genes=5000):
     """
     Identifies joint highly variable genes across different stages/categories in single-cell RNA-seq data.
-    Based on Seurat v3 normalized variance [Stuart19]
+    Based on Seurat v3 normalized variance [Stuart19].
+
+    For all samples together and for each category separately, the normalized
+    variance of each gene is calculated. The maximum normalized variance across
+    all categories is then calculated for each gene. The top highly variable
+    genes are then identified based on the maximum normalized variance across
+    all categories.
 
     Parameters
     ----------
