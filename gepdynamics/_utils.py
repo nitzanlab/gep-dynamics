@@ -289,7 +289,11 @@ class MyGProfiler(GProfiler):
 
         result_df = super().profile(query=query, **args)
         result_df['enrichment'] = self.calculate_enrichment(result_df)
-
+        
+        # formatting nicely:
+        result_df['p_value'] = result_df['p_value'].map('{:.3e}'.format)
+        result_df['enrichment'] = result_df['enrichment'].map('{:.2f}'.format)
+        
         if df_reordered:
             return result_df[[
                 'native', 'name', 'p_value', 'enrichment', 'description',
