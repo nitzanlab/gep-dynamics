@@ -25,6 +25,7 @@ NON_NEG_CMAP = cubehelix_palette(start=.5, rot=-.3, light=1, as_cmap=True)
 # Truncated spearman correlation cutoff
 N_COMPARED_RANKED = 1000 # number of top ranked genes to compare
 
+
 ## Classes
 class NMFEngine(str, Enum):
     """
@@ -32,8 +33,7 @@ class NMFEngine(str, Enum):
     """
     sklearn = "sklearn"
     torchnmf = "torchnmf"
-    consensus = "consensus"
-    consensus_torch = "consensus_torch"
+
 
 class Stage(str, Enum):
     INITIALIZED = "Initialized"

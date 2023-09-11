@@ -467,9 +467,57 @@ class Comparator(object):
 
         return normalized.astype(self.usages_matrix_a.dtype)
 
+    def _run_nmf_with_known_usages(self,
+                                   usages_matrix: np.ndarray,
+                                   data: np.ndarray,
+                                   name: str,
+                                   tens: 'torch.Tensor' = None) -> NMFResult:
+        """
+        Run NMF with known usages matrix
+        """
+        # working in the transposed notation to fit the NMF API
+        #  to get the programs: data.T ~ geps.T @ usages.T
+
+        nmf_kwargs = {'H': usages_matrix.T.copy(),
+                      'update_H': False,
+                      'n_components': usages_matrix.shape[1],
+                      'tol': NMF_TOLERANCE,
+                      'max_iter': self.max_nmf_iter,
+                      'beta_loss': self.beta_loss,
+                      'solver': 'mu'
+                      }
+
+        if self.nmf_engine == NMFEngine.torchnmf:
+            if tens is None:
+                W, H, n_iter = cnmf.nmf_torch(
+                    data.T, nmf_kwargs, device=self._set_torch_device(),
+                    verbose=(self.verbosity > 1))
+            else:
+                W, H, n_iter = cnmf.nmf_torch(
+                    data.T, nmf_kwargs, tens=tens, verbose=(self.verbosity > 1))
+        elif self.nmf_engine == NMFEngine.sklearn:
+            W, H, n_iter = sknmf.non_negative_factorization(
+                data.T, **nmf_kwargs, verbose=(self.verbosity > 1))
+        else: # not implemented
+            raise NotImplementedError(f'NMF engine {self.nmf_engine} is not implemented')
+
+        loss_per_cell = pfnmf.calc_beta_divergence(
+            data.T, W, np.zeros((W.shape[0], 0)),
+            H, np.zeros((0, H.shape[1])), per_column=True)
+
+        return NMFResult(
+            name=name,
+            loss_per_cell=loss_per_cell,
+            rank=W.shape[1],
+            W=H.T,
+            H=W.T)
+
     def extract_geps_on_jointly_hvgs(self, min_cells_per_gene: int = 5):
         """
         Identify A GEPs on timepoints A and B jointly highly variable genes
+
+        # TBD: add normalization option
+
         """
         # assert state is INITIALIZED
         assert self.stage == Stage.INITIALIZED, \
@@ -488,41 +536,15 @@ class Comparator(object):
         else:
             self.joint_hvgs = self.adata_a.var.index[self.adata_a.var[self.joint_hvgs]]
 
-        # Extracting GEPs on joint HVG, working in the transposed notation
-        #  to get the programs: X_a.T ~ geps.T @ usages.T
-
-        nmf_kwargs = {'H': self.usages_matrix_a.T.copy(),
-                      'update_H': False,
-                      'n_components': self.rank_a,
-                      'tol': NMF_TOLERANCE,
-                      'max_iter': self.max_nmf_iter,
-                      'beta_loss': self.beta_loss,
-                      'solver': 'mu'
-                      }
+        if self.verbosity > 0:
+            print(f'Extracting A GEPs on jointly highly variable genes')
 
         X_a = self._normalize_adata_for_decomposition(self.adata_a)
 
-        if self.verbosity > 0:
-            print(f'Extracting A GEPs on jointly highly variable genes')
-        if self.nmf_engine in (NMFEngine.torchnmf, NMFEngine.consensus_torch):
-            W, H, n_iter = cnmf.nmf_torch(
-                X_a.T, nmf_kwargs, device=self._set_torch_device(),
-                verbose=(self.verbosity > 1))
-        else:
-            W, H, n_iter = sknmf.non_negative_factorization(X_a.T, **nmf_kwargs, verbose=(self.verbosity > 1))
+        self.a_result = self._run_nmf_with_known_usages(
+            self.usages_matrix_a, X_a, 'A')
 
-        self.geps_a = W.T / np.linalg.norm(W.T, ord=2, axis=1, keepdims=True)
-
-        loss_per_cell = pfnmf.calc_beta_divergence(
-            X_a.T, W, np.zeros((W.shape[0], 0)),
-            H, np.zeros((0, H.shape[1])), per_column=True)
-
-        self.a_result = NMFResult(
-            name='A',
-            loss_per_cell=loss_per_cell,
-            rank=W.shape[1],
-            W=H.T,
-            H=W.T)
+        self.geps_a = self.a_result.H / np.linalg.norm(self.a_result.H, ord=2, axis=1, keepdims=True)
 
         # calculate gene coefs for each GEP
         self._calculate_gene_coefficients(self.adata_a, [self.a_result])
@@ -535,7 +557,7 @@ class Comparator(object):
         """
         Examine the decomposition of A on jointly HVGs
         """
-        if self.stage in (Stage.INITIALIZED):
+        if self.stage == Stage.INITIALIZED:
             raise RuntimeError('Must extract GEPs on jointly HVGs first')
 
         res = self.a_result
@@ -575,20 +597,18 @@ class Comparator(object):
             plt.show()
         plt.close()
 
-
-    def decompose_b(self, repeats: int = 1):
+    def decompose_b(self, repeats: int = 1, precalculated_denovo_usage_matrices: List[np.ndarray] = None):
         """
         Decompose timepoint B data de-novo and using timepoint A GEP matrix with 0,1,2,3 additional degrees of freedom.
 
         Parameters
         ----------
 
-        # TODO: add normalization option
-        # TODO: add support for repeats > 1 in de-novo and fnmf (requires random initialization)
+        # TBD: add normalization option
+        # TBD: add support for repeats > 1 in de-novo and fnmf (requires random initialization)
         """
         if self.stage == Stage.INITIALIZED:
-            print('Object not prepared, extracting GEPs on jointly highly variable genes')
-            self.extract_geps_on_jointly_hvgs()
+            raise RuntimeError('Must extract GEPs on jointly HVGs first')
 
         X_b = self._normalize_adata_for_decomposition(self.adata_b)
 
@@ -599,15 +619,12 @@ class Comparator(object):
 
             if self.verbosity > 0:
                 print('Decomposing B de-novo')
-            self._decompose_b_denovo(X_b)
+            self._decompose_b_denovo(X_b, usages_matrices=precalculated_denovo_usage_matrices)
 
         elif self.nmf_engine == NMFEngine.torchnmf:
-            if 'torch' not in dir():
-                try:
-                    import torch
-                except ImportError:
-                    raise ImportError("torch module is not installed. To use torchnmf engine please install torch.")
-            tens = torch.tensor(X_b).to(self._set_torch_device())
+            global torch   # if exists, imported by _set_torch_device
+            device = self._set_torch_device()
+            tens = torch.tensor(X_b).to(device)
 
             if self.verbosity > 0:
                 print('Decomposing B using A GEPs and no additional GEPs')
@@ -615,7 +632,7 @@ class Comparator(object):
 
             if self.verbosity > 0:
                 print('Decomposing B de-novo')
-            self._decompose_b_denovo(X_b, tens)
+            self._decompose_b_denovo(X_b, tens, usages_matrices=precalculated_denovo_usage_matrices)
 
             del tens
 
@@ -633,7 +650,7 @@ class Comparator(object):
 
         self.stage = Stage.DECOMPOSED
 
-    def _decompose_b_fnmf(self, X_b: np.ndarray, tens: 'torch.Tensor'=None):
+    def _decompose_b_fnmf(self, X_b: np.ndarray, tens: 'torch.Tensor' = None):
         """
         Decompose timepoint B data using timepoint A GEPs and no additional GEPs
 
@@ -654,32 +671,49 @@ class Comparator(object):
         self.fnmf_result = self._run_nmf(
             X_b, nmf_kwargs, self.a_sname, tens, verbose=self.verbosity)
 
-    def _decompose_b_denovo(self, X_b: np.ndarray, tens: 'torch.Tensor' = None):
+    def _decompose_b_denovo(self, X_b: np.ndarray, tens: 'torch.Tensor' = None,
+                            usages_matrices: List[np.ndarray] = None):
         """
         Decompose timepoint B data de-novo
 
-        # ToDo: add support for repeats > 1 in de-novo
+        # TBD: add support for repeats > 1 in de-novo
         Parameters
         ----------
         """
         self.denovo_results = []
 
-        for added_rank in range(self.max_added_rank + 1):
-            rank = self.rank_a + added_rank
+        if usages_matrices is None:
+            for added_rank in range(self.max_added_rank + 1):
+                rank = self.rank_a + added_rank
 
-            if self.verbosity > 0:
-                print(f'Decomposing B de-novo, rank={rank}')
+                if self.verbosity > 0:
+                    print(f'Decomposing B de-novo, rank={rank}')
 
-            nmf_kwargs={
-                'n_components': rank,
-                'tol': NMF_TOLERANCE,
-                'max_iter': self.max_nmf_iter,
-                'beta_loss': self.beta_loss,
-                'solver': 'mu'
-               }
+                nmf_kwargs={
+                    'n_components': rank,
+                    'tol': NMF_TOLERANCE,
+                    'max_iter': self.max_nmf_iter,
+                    'beta_loss': self.beta_loss,
+                    'solver': 'mu'
+                   }
 
-            self.denovo_results.append(self._run_nmf(
-                X_b, nmf_kwargs, f'dn_{rank}', tens, verbose=self.verbosity))
+                self.denovo_results.append(self._run_nmf(
+                    X_b, nmf_kwargs, f'dn_{rank}', tens, verbose=self.verbosity))
+        else:
+            assert len(usages_matrices) == self.max_added_rank + 1, \
+                f'Expected {self.max_added_rank + 1} usage matrices, got {len(usages_matrices)}'
+            for added_rank in range(self.max_added_rank + 1):
+                rank = self.rank_a + added_rank
+
+                assert usages_matrices[added_rank].shape[1] == rank, \
+                    f'Expected usage matrix rank {rank}, got {usages_matrices[added_rank].shape[1]}'
+
+                if self.verbosity > 0:
+                    print(f'Decomposing B de-novo, rank={rank}')
+
+                self.denovo_results.append(self._run_nmf_with_known_usages(
+                    usages_matrices[added_rank], X_b, f'dn_{rank}', tens)
+                )
 
     def _decompose_b_pfnmf(self, X_b: np.ndarray, repeats: int = 1):
         """
