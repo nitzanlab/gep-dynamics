@@ -360,7 +360,9 @@ class Comparator(object):
         Set the torch device to use for torch-based NMF engine. return the device.
 
         """
-        if 'torch' not in dir():
+        if 'torch' not in globals():
+            global torch
+            print('trying to import torch')
             try:
                 import torch
             except ImportError:
@@ -494,7 +496,7 @@ class Comparator(object):
                     verbose=(self.verbosity > 1))
             else:
                 W, H, n_iter = cnmf.nmf_torch(
-                    data.T, nmf_kwargs, tens=tens, verbose=(self.verbosity > 1))
+                    data.T, nmf_kwargs, tens=tens.T, verbose=(self.verbosity > 1))
         elif self.nmf_engine == NMFEngine.sklearn:
             W, H, n_iter = sknmf.non_negative_factorization(
                 data.T, **nmf_kwargs, verbose=(self.verbosity > 1))
@@ -622,7 +624,6 @@ class Comparator(object):
             self._decompose_b_denovo(X_b, usages_matrices=precalculated_denovo_usage_matrices)
 
         elif self.nmf_engine == NMFEngine.torchnmf:
-            global torch   # if exists, imported by _set_torch_device
             device = self._set_torch_device()
             tens = torch.tensor(X_b).to(device)
 

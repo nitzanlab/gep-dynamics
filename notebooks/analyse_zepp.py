@@ -54,16 +54,16 @@ print(os.getcwd())
 
 
 
-# %% [markdown]
-# ## 1. Obtaining the AnnData object and complementary metadata
-# The adata contains log1p(CP10K) data, we un-transform the data to have the original counts as `X`
-
 # %%
 results_dir = _utils.set_dir('results')
 results_dir = _utils.set_dir(results_dir.joinpath('zepp'))
 data_dir = _utils.set_dir('data')
 GSE_dir = _utils.set_dir(data_dir.joinpath('GSE149563'))
 
+
+# %% [markdown]
+# ## 1. Obtaining the AnnData object and complementary metadata
+# The adata contains log1p(CP10K) data, we un-transform the data to have the original counts as `X`
 
 # %% magic_args="--no-raise-error false # remove this to run the downloading" language="script"
 #
@@ -221,8 +221,8 @@ categories = subset.obs[column_of_interest].cat.categories
 split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
 
 for cat in categories:
-    print(f'working on {cat}')
     if not split_adatas_dir.joinpath(f'{cat}.h5ad').exists():
+        print(f'working on {cat}')
         tmp = subset[subset.obs[column_of_interest] == cat].copy()
 
         tmp.uns['name'] = f'{cat}'   # full name
@@ -235,6 +235,8 @@ for cat in categories:
         tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
         del tmp
+    else:
+        print(f'loading {cat}')
 
 # %% [markdown]
 # ## 4. Running consensus NMF iterations
@@ -277,69 +279,43 @@ for cat in categories:
                                   close_fig=True, show_clustering=True, gpu=True)
         # printing the selected knee point
         df = cnmf.load_df_from_npz(c_object.paths['k_selection_stats_dt'] % c_object.convert_dt_to_str(thresh))
-        pos = len(df) - 5
+        pos = len(df) - 4
         for i in range(5):
             print(cnmf.find_knee_point(df.prediction_error[:pos + i], df.k_source[:pos + i]), end=", ")
         print()
 
 # %% [markdown]
-# ## 5. Selecting decomposition rank for cNMF utilizing K-selection plots and PCA variance explained
-
-# %%
-# %%time
-df_var = pd.DataFrame()
-df_cumulative_var = pd.DataFrame()
-
-n_components = 50
-
-for cat in categories:
-    
-    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
-    
-    a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.joint_highly_variable], n_comps=n_components, return_info=True)
-
-    df_var[f'{cat}'] = c*100
-    df_cumulative_var[f'{cat}'] = c.cumsum()*100
-
-
-# %%
-plt.plot(range(len(df_var)), df_var, label=df_var.columns)
-plt.title('Variance explained - jointly highly variable genes')
-plt.legend()
-plt.yscale('log')
-plt.show()
-
-# %%
-plt.plot(df_cumulative_var.index, 100-df_cumulative_var, label=df_var.columns)
-plt.yscale('log')
-plt.title(f' 1- CDF variance explained joint highly variable')
-plt.legend()
-plt.show()
+# ## 5. Selecting decomposition rank for cNMF using knee-point
 
 # %%
 thresh = 0.5
+selected_cnmf_params = {}
 
 for cat in categories:
     print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
     c_object = cnmf.cNMF(cnmf_dir, cat)
 
     df = cnmf.load_df_from_npz(c_object.paths['k_selection_stats_dt'] % c_object.convert_dt_to_str(thresh))
-    pos = len(df) - 5
+    pos = len(df) - 4
     for i in range(5):
         print(cnmf.find_knee_point(df.prediction_error[:pos + i], df.k_source[:pos + i]), end=", ")
     print()
+    
+    selected_cnmf_params[cat] = (int(cnmf.find_knee_point(df.prediction_error, df.k_source)), thresh)
+
+selected_cnmf_params
 
 # %%
 # %%time
 
-selected_cnmf_params = {
-    'E12': (6, 0.5),  # 
-    'E15': (7, 0.5),  # 
-    'E17': (5, 0.5),   # 
-    'P3': (5, 0.5),    # 
-    'P7': (6, 0.5),   # 
-    'P15': (4, 0.5),  # 
-    'P42': (5, 0.5)}   # 
+# selected_cnmf_params = {
+#     'E12': (6, 0.5),  # 
+#     'E15': (7, 0.5),  # 
+#     'E17': (5, 0.5),   # 
+#     'P3': (5, 0.5),    # 
+#     'P7': (6, 0.5),   # 
+#     'P15': (4, 0.5),  # 
+#     'P42': (5, 0.5)}   # 
 
 split_adatas = {}
 
@@ -351,6 +327,7 @@ for cat, (k, threshold) in selected_cnmf_params.items():
     
     c_object = cnmf.cNMF(cnmf_dir, cat)
     c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                       consensus_method='mean',
                        nmf_refitting_iters=1000, show_clustering=False)
 
     usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
@@ -454,28 +431,49 @@ for cat in categories:
 # %%
 # %%time
 
+cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 pairs = [(categories[i], categories[i + 1]) for i in range(len(categories) - 1)]
 
 for cat_a, cat_b in pairs:
+    print(f'comparing {cat_a} and {cat_b}')
     comparison_dir = _utils.set_dir(results_dir.joinpath(f"same_genes_{cat_a}_{cat_b}"))
     
     adata_a = split_adatas[cat_a]
     adata_b = split_adatas[cat_b]
     
-    if os.path.exists(comparison_dir.joinpath('comparator.npz')):
-        cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
-    else:
-        cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir,
-                                    'torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
-                                   highly_variable_genes='joint_highly_variable')
-        
-        print('decomposing')
-        cmp.extract_geps_on_jointly_hvgs()
-        cmp.decompose_b(repeats = 5)
+    # if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+    #     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    # else:
+    cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir,
+                                'torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
+                               highly_variable_genes='joint_highly_variable')
+
+    print('decomposing')
+    cmp.extract_geps_on_jointly_hvgs()
     
-    cmp.examine_adata_a_decomposition_on_jointly_hvgs()
+    # getting cnmf results
+    c_object = cnmf.cNMF(cnmf_dir, cat_b)
+    usages_matrices_b = []
+    
+    threshold = adata_b.uns['cnmf_params']['threshold']
+    for k in range(cmp.rank_a, cmp.rank_a + cmp.max_added_rank + 1):
+        try:
+            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+        except FileNotFoundError:
+            print(f'Calculating consensus NMF for k={k} and threshold={threshold}')
+            c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                               consensus_method='mean',
+                               nmf_refitting_iters=1000, show_clustering=False)
+
+            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+        
+        usages_matrices_b.append(usages)
+    
+    cmp.decompose_b(repeats = 5, precalculated_denovo_usage_matrices=usages_matrices_b)
     
     cmp.print_errors()
+    
+    cmp.examine_adata_a_decomposition_on_jointly_hvgs()
     cmp.examine_adata_b_decompositions()
     cmp.plot_decomposition_comparisons()
     
