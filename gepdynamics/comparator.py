@@ -234,6 +234,65 @@ class NMFResultBase(object):
                 plt.show()
             plt.close()
 
+    def plot_utilization_scatter(self, coordinates: np.ndarray,
+                                saving_folder: _utils.PathLike = None,
+                                save: bool = True, show: bool = False):
+        """
+        Plot the utilization pattern according to supplied coordinates.
+
+        Parameters:
+        ----------
+        coordinates : np.ndarray
+            Array of shape (n_cells, 2) containing the x, y coordinates for
+            plotting the gene coefficients.
+        saving_folder : _utils.PathLike, optional
+            Path to the folder where the plots will be saved (default is None).
+        save : bool, optional
+            Whether to save the plots as image files (default is True).
+        show : bool, optional
+            Whether to display the plots (default is False).
+
+        Raises:
+        -------
+        ValueError
+            If `saving_folder` is not specified when `save=True`.
+
+        Returns:
+        --------
+        None
+        """
+        if saving_folder is None and save:
+            raise ValueError('saving_folder must be specified if save=True')
+        elif save:
+            projections_folder = _utils.set_dir(saving_folder)
+
+        color_map = sns.color_palette(f"light:green", as_cmap=True)
+
+        for i in range(self.rank):
+            plt.scatter(
+                coordinates[:, 0], coordinates[:, 1], s=2,
+                c=_utils.floats_to_colors(self.norm_usages[:, i], color_map),
+                # marker=adata.uns['marker'],
+                label=f'{self.prog_names[i]}')
+
+            ax = plt.gca()
+
+            ax.set_xlabel('UMAP 1')
+            ax.set_ylabel('UMAP 2')
+            ax.set_title(f'Program Utilization UMAP')
+
+            ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+
+            plt.tight_layout()
+            plt.legend()
+
+            if save:
+                plt.savefig(projections_folder.joinpath(f'{self.prog_names[i]}.png'))
+            if show:
+                plt.show()
+            plt.close()
+
+
 class NMFResult(NMFResultBase):
     def __init__(self, name, loss_per_cell, rank, W, H):
         super().__init__(name, loss_per_cell, rank, 'regular')
@@ -812,6 +871,7 @@ class Comparator(object):
 
         self._plot_loss_per_cell_histograms(max_kde_value, show, save)
         self._plot_usages_clustermaps(show, save)
+        self._plot_utilization_scatters(show, save)
 
         self.plot_correlations_flow_chart([self.fnmf_result, *self.pfnmf_results, *self.denovo_results[::-1]],
                                           usage_corr_threshold = 0.25,
@@ -890,6 +950,24 @@ class Comparator(object):
                 un_sns.savefig(dec_folder.joinpath(f'{res.name}_normalized_usages_clustermap.png'))
 
             plt.close()
+
+    # plot utilization scatters for all the decompositions
+    def _plot_utilization_scatters(self, show: bool = False, save: bool = True):
+        """
+        Plot the utilization scatters for all the decompositions
+        """
+
+        projections_folder = _utils.set_dir(self.results_dir.joinpath('programs_projections'))
+
+        self.a_result.plot_utilization_scatter(
+            self.adata_a.obsm['X_umap'],
+            saving_folder=projections_folder, show=show, save=save)
+
+        for res in self._all_results:
+            res.plot_utilization_scatter(
+                self.adata_b.obsm['X_umap'],
+                saving_folder=projections_folder, show=show, save=save)
+
 
     def plot_decomposition_comparisons(self, show: bool = False,
                                        save: bool = True, max_cell_loss: float = 2000):
