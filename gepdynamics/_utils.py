@@ -445,14 +445,23 @@ def calculate_anndata_object_density(adata: sc.AnnData):
     return non_zeros / (adata.shape[0] * adata.shape[1])
 
 
-def _create_usages_norm_adata(adata):
+def _create_usages_norm_adata(adata, norm_usages: np.ndarray = None, prog_names: list = None):
     '''Given an adata with normalized usages of programs, create anndata'''
-    var = pd.DataFrame(index=adata.varm['usage_coefs'].columns)
+    if norm_usages is None:
+        norm_usages = adata.obsm['usages_norm'].copy()
+
+    if prog_names is None:
+        prog_names = adata.varm['usage_coefs'].columns
+    var = pd.DataFrame(index=prog_names)
+
+    # make sure the length of prog_names is similar to the number of columns in norm_usages
+    assert len(prog_names) == norm_usages.shape[1], \
+        "The number of programs names is not equal to the number of columns in norm_usages"
 
     with warnings.catch_warnings():  # supress 64 -> 32 float warning
         warnings.simplefilter(action='ignore', category=FutureWarning)
         return sc.AnnData(
-            adata.obsm['usages_norm'].copy(), obs=adata.obs.copy(),
+            norm_usages, obs=adata.obs.copy(),
             var=var.copy(), uns=deepcopy(adata.uns), obsm=deepcopy(adata.obsm))
 
 
@@ -493,13 +502,19 @@ def expand_adata_row_colors(adata: sc.AnnData, new_color_column):
 def plot_usages_norm_violin(
         adata: sc.AnnData,
         group_by_key: str,  # obs key
-        save_path: typing.Union[PathLike, None]=None,
+        norm_usages: np.ndarray = None,
+        prog_names: list = None,
+        title: str = None,
+        save_path: typing.Union[PathLike, None] = None,
+        show: bool = False,
         close: bool=True
 ) -> sc.plotting._baseplot_class.BasePlot:
-    u_data = _create_usages_norm_adata(adata)
+    if title is None:
+        title = f'{adata.uns["name"]} program usage per {group_by_key}'
+
+    u_data = _create_usages_norm_adata(adata, norm_usages, prog_names)
     u_data.obs[group_by_key] = pd.Categorical(
         u_data.obs[group_by_key]).remove_unused_categories()
-    _sname = u_data.uns["sname"]
 
     # Lineages hierarchical clustering
     sc.tl.dendrogram(u_data, group_by_key, cor_method='spearman', use_rep='X')
@@ -510,7 +525,6 @@ def plot_usages_norm_violin(
     prog_order = hierarchy.leaves_list(hierarchy.optimal_leaf_ordering(
         linkage, u_data.X.T))
 
-    title = f'{u_data.uns["name"]} program usage per {group_by_key}'
 
     vp = sc.pl.stacked_violin(
         u_data, u_data.var_names[prog_order], groupby=group_by_key,
@@ -518,7 +532,8 @@ def plot_usages_norm_violin(
 
     if save_path is not None:
         vp.savefig(save_path, dpi=180)
-
+    if show:
+        vp.show()
     if close:
         plt.close(vp.fig)
 

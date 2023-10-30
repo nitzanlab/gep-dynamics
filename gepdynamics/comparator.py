@@ -645,7 +645,6 @@ class Comparator(object):
 
         if save:
             un_sns.savefig(dec_folder.joinpath(f'{res.name}_normalized_usages_clustermap.png'))
-
         plt.close()
 
         # loss per cell histogram
@@ -915,6 +914,22 @@ class Comparator(object):
             plt.show()
         plt.close()
 
+    def _get_title(self, res: NMFResult):
+        """
+        helper function to get a title for clustermap/violin plot
+
+        """
+        if 'dn' in res.name:
+            return f"{self.b_sname} %s of " \
+                    f"de-novo GEPs, k={res.rank}"
+        elif res.rank == self.rank_a:
+            return f"{self.b_sname} %s of " \
+                    f"{self.a_sname} GEPs (rank={res.rank})"
+        elif res.algorithm == 'pfnmf':
+            return f"{self.b_sname} %s of " \
+                    f"{self.a_sname} GEPs + " \
+                    f"{res.rank - self.rank_a} novel GEPs"
+
     def _plot_usages_clustermaps(self, show: bool = False, save: bool = True):
         """
         Plot the usages of the decomposed GEPs as clustermaps
@@ -922,17 +937,7 @@ class Comparator(object):
         dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
 
         for res in self._all_results:
-            name = res.name
-            if 'dn' in name:
-                title = f"{self.b_sname} normalized usages of " \
-                        f" de-novo GEPs, k={res.rank}"
-            elif res.rank == self.rank_a:
-                title = f"{self.b_sname} normalized usages of " \
-                        f"{self.a_sname} GEPs (rank={res.rank})"
-            elif res.algorithm == 'pfnmf':
-                title = f"{self.b_sname} normalized usages of " \
-                        f"{self.a_sname} GEPs + " \
-                        f"{res.rank - self.rank_a} novel GEPs"
+            title = self._get_title(res) % 'normalized usages'
 
             row_colors = _utils.expand_adata_row_colors(self.adata_b, pd.Series(
                 _utils.floats_to_colors(res.loss_per_cell, cmap='RdYlGn_r', vmax=(
@@ -950,6 +955,48 @@ class Comparator(object):
                 un_sns.savefig(dec_folder.joinpath(f'{res.name}_normalized_usages_clustermap.png'))
 
             plt.close()
+
+    # plot usages violin plots for all the decompositions
+    def plot_usages_violin(self, group_by_key: str, group_by_string: str = None,
+                           show: bool = False, save: bool = True):
+        """
+        Plot the usages of the decomposed GEPs as violin plots
+
+        Parameters
+        ----------
+        group_by_key : str
+            The key in `adata.obs` to group the cells by.
+        group_by_string : str, optional
+            The string describing the grouping in the plot. Defaults to `group_by_key`.
+        show : bool, optional
+            Whether to display the plot. Defaults to False.
+        save : bool, optional
+            Whether to save the plot as an image. Defaults to True.
+        """
+        if group_by_string is None:
+            group_by_string = group_by_key
+
+        dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
+
+        res = self.a_result
+        title = (f"{self.a_sname} {group_by_string} violin plot of original GEPs"
+                 f", k={res.rank}")
+        _utils.plot_usages_norm_violin(
+            self.adata_a, group_by_key=group_by_key, norm_usages=res.norm_usages,
+            prog_names=res.prog_names, title=title, show=show,
+            save_path=dec_folder.joinpath(
+                f'{res.name}_normalized_usages_violin_plots.png'))
+
+        for res in self._all_results:
+            title = self._get_title(res) % f'{group_by_string} violin plot'
+            _utils.plot_usages_norm_violin(
+                self.adata_b, group_by_key=group_by_key,
+                norm_usages=res.norm_usages,
+                prog_names=res.prog_names,
+                title=title,
+                save_path=dec_folder.joinpath(
+                    f'{res.name}_normalized_usages_violin_plots.png'),
+                show=show)
 
     # plot utilization scatters for all the decompositions
     def _plot_utilization_scatters(self, show: bool = False, save: bool = True):
