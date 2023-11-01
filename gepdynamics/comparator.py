@@ -1114,6 +1114,26 @@ class Comparator(object):
                 plt.show()
             plt.close()
 
+    def plot_marker_genes_heatmaps(self, marker_genes: List[str],
+                                   show: bool = False, save: bool = True):
+        """
+        Plot heatmaps of the marker genes coefficients for each decomposition
+        """
+        dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
+
+        for res in [self.a_result, *self._all_results]:
+            sns.heatmap(res.gene_coefs.loc[marker_genes].T,
+                        cmap='coolwarm', vmin=-2, vmax=2)
+
+            plt.title(f'Marker genes coefficients for {res.name}')
+            plt.tight_layout()
+
+            if save:
+                plt.savefig(dec_folder.joinpath(f'{res.name}_marker_genes_heatmap.png'))
+            if show:
+                plt.show()
+            plt.close()
+
     def run_gsea(self, n_top_genes: int = 1000, gprofiler_kwargs: Dict[str, Any] = None,
                  gene_ids_column_number: int = 0):
         """
