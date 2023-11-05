@@ -49,7 +49,87 @@ from gepdynamics._constants import NMFEngine, Stage, NUMBER_HVG, NMF_TOLERANCE, 
 
 
 class NMFResultBase(object):
+    """
+    A base class for storing and manipulating results from Non-negative Matrix Factorization (NMF).
+
+    This class should be extended by specific NMF result classes that calculate the attributes
+    and implement any additional functionality specific to the type of NMF performed.
+
+    Attributes
+    ----------
+    name : str
+        The name identifier for the NMF result.
+    loss_per_cell : np.ndarray
+        Array of shape (n_cells,) containing the loss for each cell.
+    rank : int
+        The rank used in the NMF algorithm.
+    algorithm : str
+        The name of the algorithm used for NMF. Valid values are 'regular' and 'pfnmf'.
+    loss : float
+        The total loss computed as the sum of `loss_per_cell`.
+    prog_names : list of str
+        List of program names.
+    norm_usages : np.ndarray
+        Array of shape (n_cells, rank) with normalized usages per cell.
+    prog_percentages : np.ndarray
+        Array of shape (rank,) with total program usage percentages across all dataset.
+    prog_labels_1l : list of str
+        List of program labels in one line.
+    prog_labels_2l : list of str
+        List of program labels in two lines.
+    gene_coefs : pd.DataFrame
+        Gene coefficients for each program, shape is (n_genes, rank).
+    gsea_results : list of pd.DataFrame
+        Results from Gene Set Enrichment Analysis. see `gepdynamics._utils.gsea`.
+
+    Methods
+    -------
+    __init__(self, name: str, loss_per_cell: np.ndarray, rank: int, algorithm: str)
+        Initializes the NMFResultBase instance, extended by subclasses.
+
+    calculate_prog_labels(self)
+        Calculates the program labels and percentages. Utilized in subclasses constructors
+
+    aggregate_results(results: List['NMFResultBase']) -> Tuple[list, list, np.ndarray, list]
+        Aggregates results from a list of NMFResultBase objects for use in correlations flow chart.
+
+    calculate_gene_coefs(self, z_scores: np.ndarray, gene_index: pd.Index)
+        Calculates gene coefficients for each program based on Z-scores.
+
+    get_top_genes(self, n: int = 100) -> pd.DataFrame
+        Returns a DataFrame with the top 'n' genes based on their coefficients for each program.
+
+    plot_loss_per_cell_histogram(self, bins: int = 25, max_value: float = 2500,
+                                 saving_folder: _utils.PathLike = None,
+                                 save: bool = True, show: bool = False)
+        Plots and optionally saves a histogram of the loss per cell distribution.
+
+    plot_correlations_heatmaps(self, tsc_truncation_level: int = 1000,
+                               saving_folder: _utils.PathLike = None,
+                               save: bool = True, show: bool = False):
+        Plots heatmaps for the usage and gene coefficients correlations.
+
+    plot_utilization_scatter(self, coordinates: np.ndarray,
+                             saving_folder: _utils.PathLike = None,
+                             save: bool = True, show: bool = False):
+        Plots a scatter plot of utilization patterns based on given coordinates.
+    """
     def __init__(self, name: str, loss_per_cell: np.ndarray, rank: int, algorithm: str):
+        """
+        Constructs all the necessary attributes for the NMFResultBase object.
+        Most attributes are set by the subclasses constructors.
+
+        Parameters
+        ----------
+        name : str
+            Name identifier for the NMF result.
+        loss_per_cell : np.ndarray
+            Loss per cell as an array.
+        rank : int
+            Rank of the result.
+        algorithm : str
+            Name of the NMF algorithm used.
+        """
         self.name = name
         self.loss_per_cell = loss_per_cell
         self.rank = rank
@@ -67,6 +147,11 @@ class NMFResultBase(object):
         self.gsea_results = None
 
     def calculate_prog_labels(self):
+        """
+        Calculates and assigns program total use percentages and labels to the instance.
+        Program percentages are calculated based on the sum of normalized usages
+        across cells. Two types of labels are created: one-line labels and two-line labels.
+        """
         self.prog_percentages = self.norm_usages.sum(axis=0) * 100 / len(self.loss_per_cell)
         self.prog_labels_1l = [name + f' ({self.prog_percentages[i]:0.1f}%)' for i, name in enumerate(self.prog_names)]
         self.prog_labels_2l = [name + f'\n({self.prog_percentages[i]:0.1f}%)' for i, name in enumerate(self.prog_names)]
@@ -74,7 +159,7 @@ class NMFResultBase(object):
     @staticmethod
     def aggregate_results(results: List['NMFResultBase']) -> Tuple[list, list, np.ndarray, list]:
         """
-        Aggregate results from a list of NMFResult objects.
+        Aggregate results from a list of NMFResult objects, used in correaltions flow chart.
 
         Parameters
         ----------
@@ -102,14 +187,15 @@ class NMFResultBase(object):
 
     def calculate_gene_coefs(self, z_scores: np.ndarray, gene_index: pd.Index):
         """
-        Calculate gene coefficients for each program.
+        Calculate gene coefficients for each program. Updates the `gene_coefs`
+        attribute with a DataFrame of shape (n_genes, rank) for the results.
 
         Parameters
         ----------
         z_scores : np.ndarray
             Z-scores matrix of shape (n_genes, n_cells).
         gene_index : pd.Index
-            Gene index.
+            List of gene names
 
         """
         self.gene_coefs = pd.DataFrame(
@@ -128,7 +214,7 @@ class NMFResultBase(object):
                                      saving_folder: _utils.PathLike = None,
                                      save: bool = True, show: bool = False):
         """
-        Plot the histogram of loss per cell.
+        Plots a histogram of the loss per cell and optionally saves it as an image.
 
         Parameters:
         ----------
@@ -155,12 +241,11 @@ class NMFResultBase(object):
         if saving_folder is None and save:
             raise ValueError('saving_folder must be specified if save=True')
 
-        dec_folder = _utils.set_dir(saving_folder)
-
         plt.hist(self.loss_per_cell, bins=bins, range=(0, min(max_value, self.loss_per_cell.max())))
         plt.title(f'{self.name} loss per cell distribution')
 
         if save:
+            saving_folder = _utils.set_dir(saving_folder)
             plt.savefig(saving_folder.joinpath(f'{self.name}_loss_per_cell_distribution.png'))
         if show:
             plt.show()
@@ -170,7 +255,7 @@ class NMFResultBase(object):
                                    saving_folder: _utils.PathLike = None,
                                    save: bool = True, show: bool = False):
         """
-        Plot the heatmaps for the usage and gene coefficients correlations.
+        Plots heatmaps for the usage and gene coefficients correlations.
 
         Usages correlation is calculated as Pearson correlation. gene coefficients
         correlation is calcualted as truncated spearman correlation with a cutoff
@@ -238,7 +323,7 @@ class NMFResultBase(object):
                                 saving_folder: _utils.PathLike = None,
                                 save: bool = True, show: bool = False):
         """
-        Plot the utilization pattern according to supplied coordinates.
+        Plots a scatter plot of utilization patterns based on given coordinates.
 
         Parameters:
         ----------
@@ -294,7 +379,51 @@ class NMFResultBase(object):
 
 
 class NMFResult(NMFResultBase):
+    """
+    A class representing the results of a standard NMF analysis.
+
+    Inherits from NMFResultBase.
+
+    Additional Attributes
+    ----------
+    W : np.ndarray
+        Array of shape (n_cells, rank) containing the program usages per cell.
+    H : np.ndarray
+        Array of shape (n_genes, rank) containing the gene weights per program.
+
+
+    Methods
+    -------
+    Inherits all methods from NMFResultBase.
+    """
     def __init__(self, name, loss_per_cell, rank, W, H):
+        """
+        Initializes the NMFResult instance.
+
+        Parameters
+        ----------
+        name : str
+            The name of the NMF analysis.
+        loss_per_cell : np.ndarray
+            Array containing the loss per cell with shape (n_cells,).
+        rank : int
+            The rank of the factorization, corresponding to the number of components or programs.
+        W : np.ndarray
+            Program usage matrix obtained from NMF with shape (n_cells, rank).
+        H : np.ndarray
+            Gene weights matrix obtained from NMF with shape (rank, n_genes).
+
+        Raises
+        ------
+        AssertionError
+            If the second dimension of W does not match the first dimension of H
+            and the rank, or if the first dimensions of W do not align with
+            loss_per_cell.
+        """
+        assert W.shape[1] == H.shape[0], "The second dimension of W must match the first dimension of H"
+        assert W.shape[0] == loss_per_cell.shape[0], "The first dimension of W must match the first dimension of loss_per_cell"
+        assert rank == W.shape[1], "The rank must match the second dimension of W"
+
         super().__init__(name, loss_per_cell, rank, 'regular')
         self.W = W
         self.H = H
@@ -306,7 +435,62 @@ class NMFResult(NMFResultBase):
 
 
 class PFNMFResult(NMFResultBase):
+    """
+    A class representing the results of Partially Fixed Non-negative Matrix Factorization (PFNMF).
+
+    Inherits from NMFResultBase and initializes additional attributes specific to
+    the PFNMF results.
+
+    Additional Attributes
+    ----------
+    W1 : np.ndarray
+        Fixed program usage matrix with shape (n_cells, n_fixed_programs).
+    W2 : np.ndarray
+        Novel program usage matrix with shape (n_cells, n_novel_programs).
+    H1 : np.ndarray
+        Fixed gene weights matrix with shape (n_fixed_programs, n_genes).
+    H2 : np.ndarray
+        Novel gene weights matrix with shape (n_novel_programs, n_genes).
+
+
+    Methods
+    -------
+    Inherits all methods from NMFResultBase.
+    """
     def __init__(self, name, loss_per_cell, rank, W1, W2, H1, H2):
+        """
+        Initialize the PFNMFResult instance.
+
+        Parameters
+        ----------
+        name : str
+            The name of the decomposition instance.
+        loss_per_cell : np.ndarray
+            Array containing the loss per cell with shape (n_cells,).
+        rank : int
+            The total rank of the factorization, which is the sum of fixed and novel programs.
+        W1 : np.ndarray
+            Fixed program usage matrix with shape (n_cells, n_fixed_programs).
+        W2 : np.ndarray
+            Novel program usage matrix with shape (n_cells, n_novel_programs).
+        H1 : np.ndarray
+            Fixed gene weights matrix with shape (n_fixed_programs, n_genes).
+        H2 : np.ndarray
+            Novel gene weights matrix with shape (n_novel_programs, n_genes).
+
+        Raises
+        ------
+        AssertionError
+            If the dimensions of W1 and H1, or W2 and H2, do not align, or if the
+            first dimensions of W1 do not align with W2 and loss_per_cell, or if
+            the sum of program counts in W1 and W2 does not match the rank.
+        """
+        assert W1.shape[1] == H1.shape[0], "The second dimension of W1 must match the first dimension of H1"
+        assert W2.shape[1] == H2.shape[0], "The second dimension of W2 must match the first dimension of H2"
+        assert W1.shape[0] == W2.shape[0], "The first dimension of W1 must match the first dimension of W2"
+        assert W1.shape[0] == loss_per_cell.shape[0], "The first dimension of W1 must match the first dimension of loss_per_cell"
+        assert rank == W1.shape[1] + W2.shape[1], "The rank must match the sum of the second dimensions of W1 and W2"
+
         super().__init__(name, loss_per_cell, rank, 'pfnmf')
         self.W1 = W1
         self.W2 = W2
