@@ -508,8 +508,55 @@ class PFNMFResult(NMFResultBase):
 
 class Comparator(object):
     """
-    Class implementing the comparison of two datasets by examening the applicability
-    of GEPs in one timepoint to the decomposition of the second timepoint.
+    A class for comparing two datasets (referred to as timepoints A and B) by examining the
+    applicability of Gene Expression Programs (GEPs) derived from one timepoint to the decomposition
+    of the other. This class is primarily used to understand how gene expressions evolve or vary
+    between different biological conditions or timepoints.
+
+    The comparison is done through various methods of Non-negative Matrix Factorization (NMF),
+    including de-novo decomposition and fixed/novel program decomposition (PFNMF), enabling
+    a comprehensive analysis of shared and unique gene expression patterns between the two timepoints.
+
+    Attributes
+    ----------
+    adata_a : sc.AnnData
+        scanpy annotated data object for timepoint A.
+    adata_b : sc.AnnData
+        scanpy annotated data object for timepoint B.
+    usages_matrix_a : np.ndarray
+        Usages matrix derived from timepoint A, used for comparative analysis.
+    rank_a : int
+        Rank of the NMF decomposition for timepoint A.
+    results_dir : _utils.PathLike
+        Directory path for saving analysis results.
+    nmf_engine : NMFEngine
+        Enum specifying the NMF engine to be used (e.g. sklearn and torchnmf).
+    beta_loss : str
+        Loss function to be used in NMF (e.g. 'kullback-leibler' and 'Frobenius').
+    max_nmf_iter : int
+        Maximum number of iterations for the NMF algorithm.
+    max_added_rank : int
+        Maximum additional rank to consider for PFNMF.
+    joint_hvgs : Union[str, int]
+        Highly variable genes; either a count or a key in `adata.var`.
+    device : str
+        Computing device for torch-based NMF engine.
+    verbosity : int
+        Verbosity level for logging.
+
+    Examples
+    --------
+    >>> comparator = Comparator(adata_a, usages_matrix_a, adata_b, results_dir)
+    >>> comparator.extract_geps_on_jointly_hvgs()
+    >>> comparator.examine_adata_a_decomposition_on_jointly_hvgs(show=True)
+    >>> comparator.decompose_b()
+
+    Notes
+    -----
+    The Comparator class is part of a larger workflow in the analysis of gene expression data,
+    particularly in the context of understanding temporal changes of expression programs.
+    It should be used in conjunction with appropriate preprocessing steps and subsequent
+    analysis for comprehensive insights.
 
     # ToDo: create log file
     # ToDo: add colors
@@ -575,8 +622,8 @@ class Comparator(object):
         self.device = device
 
         if isinstance(highly_variable_genes, str):
-            assert highly_variable_genes in self.adata_a.var.keys(), \
-                f"adata_a.var does not contain key {highly_variable_genes}"
+            if highly_variable_genes not in self.adata_a.var.keys():
+                raise KeyError(f"adata_a.var does not contain key {highly_variable_genes}")
         elif isinstance(highly_variable_genes, int):
             assert highly_variable_genes <= self.adata_a.n_vars, \
                 f"Number of highly variable genes {highly_variable_genes} " \
@@ -687,7 +734,8 @@ class Comparator(object):
         >>> comp = Comparator.load_from_file('comp_object.npz', adata_a, adata_b)
         """
         # make sure the file exists
-        assert os.path.exists(filename), f'File {filename} does not exist'
+        if not os.path.exists(filename):
+            raise FileNotFoundError(f'File {filename} does not exist')
 
         new_instance = np.load(filename, allow_pickle=True)['obj'].item()
 
@@ -780,7 +828,7 @@ class Comparator(object):
 
         Raises
         ------
-        AssertionError
+        RuntimeError
             If the method is called when the object is not in the INITIALIZED stage
 
         Notes
@@ -788,8 +836,8 @@ class Comparator(object):
         The method sets the object to the PREPARED stage upon successful completion.
         """
         # assert state is INITIALIZED
-        assert self.stage == Stage.INITIALIZED, \
-            f"stage is {self.stage}, expected {Stage.INITIALIZED}"
+        if self.stage != Stage.INITIALIZED:
+            raise RuntimeError(f"Stage is {self.stage}, expected {Stage.INITIALIZED}")
 
         # if joint_hvgs is numeric, use it as the number of joint genes
         if isinstance(self.joint_hvgs, int):
@@ -801,8 +849,10 @@ class Comparator(object):
                 self.adata_b[:, genes_subset], flavor='seurat_v3', n_top_genes=100_000, inplace=False)
             joint_hvg_rank = hvg_a.highly_variable_rank + hvg_b.highly_variable_rank
             self.joint_hvgs = joint_hvg_rank.sort_values()[: self.joint_hvgs].index
-        else:
+        elif isinstance(self.joint_hvgs, str):
             self.joint_hvgs = self.adata_a.var.index[self.adata_a.var[self.joint_hvgs]]
+        else:
+            raise TypeError(f"joint_hvgs must be either int or a key in `adata_a.var`")
 
         if self.verbosity > 0:
             print(f'Extracting A GEPs on jointly highly variable genes')
