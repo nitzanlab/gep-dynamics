@@ -759,10 +759,33 @@ class Comparator(object):
 
     def extract_geps_on_jointly_hvgs(self, min_cells_per_gene: int = 5):
         """
-        Identify A GEPs on timepoints A and B jointly highly variable genes
+        Identify Gene Expression Programs (GEPs) on genes that are highly variable
+        across both timepoints A and B.
 
-        # TBD: add normalization option
+        This method can operate in two modes depending on the type of `self.joint_hvgs`:
+        1. If `self.joint_hvgs` is an integer, it selects that number of top highly variable genes based on
+           the combined variability ranking from both timepoints.
+        2. If `self.joint_hvgs` is a string, it is assumed to be a key in `adata_a.var`,
+         and the method uses the corresponding variable genes already annotated in `adata_a`.
 
+        After selecting the highly variable genes, the method performs normalization
+        and re-decomposes timepoint A using the known usages matrix, this time
+        on the jointly highly variable genes.
+
+        Parameters
+        ----------
+        min_cells_per_gene : int, optional
+            Minimum number of cells in which a gene must be expressed to be considered in the analysis.
+            This parameter is only used if `self.joint_hvgs` is an integer. Defaults to 5.
+
+        Raises
+        ------
+        AssertionError
+            If the method is called when the object is not in the INITIALIZED stage
+
+        Notes
+        -----
+        The method sets the object to the PREPARED stage upon successful completion.
         """
         # assert state is INITIALIZED
         assert self.stage == Stage.INITIALIZED, \
@@ -800,7 +823,27 @@ class Comparator(object):
                                                       hist_max_value: float = 2500,
                                                       show: bool = False, save: bool = True):
         """
-        Examine the decomposition of A on jointly HVGs
+        Examine the decomposition results of timepoint A by plotting various visualizations.
+
+        This method generates and optionally displays/saves a heatmap of correlations,
+        a clustermap of normalized usages, and a histogram of the loss per cell.
+
+        Parameters
+        ----------
+        hist_bins : int, optional
+            Number of bins for the loss per cell histogram. Defaults to 25.
+        hist_max_value : float, optional
+            Maximum value for the histogram range. Defaults to 2500.
+        show : bool, optional
+            Whether to display the plots. Defaults to False.
+        save : bool, optional
+            Whether to save the plots as image files. Defaults to True.
+            plots are saved under `self.results_dir`/decompositions.
+
+        Raises
+        ------
+        RuntimeError
+            If the method is called before extracting GEPs on jointly highly variable genes.
         """
         if self.stage == Stage.INITIALIZED:
             raise RuntimeError('Must extract GEPs on jointly HVGs first')
@@ -843,13 +886,31 @@ class Comparator(object):
 
     def decompose_b(self, repeats: int = 1, precalculated_denovo_usage_matrices: List[np.ndarray] = None):
         """
-        Decompose timepoint B data de-novo and using timepoint A GEP matrix with 0,1,2,3 additional degrees of freedom.
+        Decompose timepoint B data de-novo and using timepoint A GEP matrix with additional degrees of freedom.
+
+        This method handles both de-novo decomposition and decomposition using timepoint A GEPs
+        (with varying degrees of freedom). It updates the object state with the results of decomposition.
 
         Parameters
         ----------
+        repeats : int, optional
+            Number of times the decomposition should be repeated. Defaults to 1.
+            # TBD: add support for repeats > 1 in de-novo and fnmf (requires random initialization)
+        precalculated_denovo_usage_matrices : List[np.ndarray], optional
+            Pre-calculated usage matrices for de-novo decomposition, if available. Defaults to None.
+
+        Raises
+        ------
+        RuntimeError
+            If the method is called before extracting GEPs on jointly highly variable genes.
+        NotImplementedError
+            If an NMF engine other than 'sklearn' or 'torchnmf' is used.
+
+        Notes
+        -----
+        Updates the object state to DECOMPOSED upon successful completion.
 
         # TBD: add normalization option
-        # TBD: add support for repeats > 1 in de-novo and fnmf (requires random initialization)
         """
         if self.stage == Stage.INITIALIZED:
             raise RuntimeError('Must extract GEPs on jointly HVGs first')
