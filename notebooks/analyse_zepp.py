@@ -727,7 +727,8 @@ for cat_a, cat_b in pairs:
     adata_a = split_adatas[cat_a]
     adata_b = split_adatas[cat_b]
     
-    # if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+    if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+        continue
     #     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
     # else:
     cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir,
@@ -772,3 +773,8 @@ for cat_a, cat_b in pairs:
     cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
 
 
+
+# %%
+cmp.run_gsea(gprofiler_kwargs=dict(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
+
+cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
