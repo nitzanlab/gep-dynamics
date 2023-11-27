@@ -89,6 +89,7 @@ def truncated_spearmans_correlation(data, truncation_level: int = 1000,
     ranked_data[ranked_data > truncation_level] = truncation_level
     return np.corrcoef(ranked_data, rowvar=False)
 
+
 def joint_hvg_across_stages(adata: sc.AnnData, obs_category_key: str, n_top_genes=5000):
     """
     Identifies joint highly variable genes across different stages/categories in single-cell RNA-seq data.
@@ -443,6 +444,22 @@ def calculate_anndata_object_density(adata: sc.AnnData):
         raise NotImplementedError(f"Cannot calculate density for data of type {type(adata.X)}")
  
     return non_zeros / (adata.shape[0] * adata.shape[1])
+
+
+def subset_and_normalize_for_nmf(adata, var_key='joint_highly_variable', min_cells_percent=1., dtype=np.float32) -> np.ndarray:
+    if var_key is None:
+        X = adata.X.copy()
+    else:
+        X = adata.X[:, adata.var[var_key]].copy()
+    
+    if isinstance(X, sparse.spmatrix):
+        X = X.toarray()
+    X = X.astype(dtype)
+    
+    min_cells = (adata.shape[0] * min_cells_percent / 100)
+    X = X[:, np.count_nonzero(X, axis=0) > min_cells]
+    
+    return sc.pp.scale(X, zero_center=False)
 
 
 def _create_usages_norm_adata(adata, norm_usages: np.ndarray = None, prog_names: list = None):

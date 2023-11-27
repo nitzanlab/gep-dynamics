@@ -571,6 +571,7 @@ class Comparator(object):
                  max_nmf_iter: int = 800,
                  max_added_rank: int = 3,
                  highly_variable_genes: Union[str, int] = NUMBER_HVG,
+                 tpm_target_sum: int = 100_000,
                  device: str = None,
                  verbosity: int = 0
                  ):
@@ -599,6 +600,10 @@ class Comparator(object):
             Either the adata_a.var key for joint highly variable genes, or the
             number of automatically found jointly highly variable genes for the
              two datasets. by default `_constants.NUMBER_HVG`.
+        tpm_target_sum : int, optional
+            target sum of transcript per (num) normalization as part of 
+            calculating the gene coefficients (prior to log transform and
+            z-scoring), by default 100,000
         device : str, optional
             Device to use for torch-based NMF engine, by default None.
         verbosity : int, optional
@@ -611,6 +616,7 @@ class Comparator(object):
         self.adata_b = adata_b
         self.a_sname = self.adata_a.uns['sname']
         self.b_sname = self.adata_b.uns['sname']
+        self.tpm_target_sum = tpm_target_sum
 
         self.results_dir = _utils.set_dir(results_dir)
         self.verbosity = verbosity
@@ -865,7 +871,7 @@ class Comparator(object):
         self.geps_a = self.a_result.H / np.linalg.norm(self.a_result.H, ord=2, axis=1, keepdims=True)
 
         # calculate gene coefs for each GEP
-        self._calculate_gene_coefficients(self.adata_a, [self.a_result])
+        self._calculate_gene_coefficients(self.adata_a, [self.a_result], self.tpm_target_sum)
 
         self.stage = Stage.PREPARED
 
@@ -1000,7 +1006,7 @@ class Comparator(object):
 
         self._all_results = self.denovo_results + [self.fnmf_result] + self.pfnmf_results
 
-        self._calculate_gene_coefficients(self.adata_b, self._all_results)
+        self._calculate_gene_coefficients(self.adata_b, self._all_results, self.tpm_target_sum)
 
         self.stage = Stage.DECOMPOSED
 

@@ -7,7 +7,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.14.4
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -36,13 +36,16 @@ from importlib import reload
 import sys
 import os
 import time
+import warnings
 
 import numpy as np
 import pandas as pd
 from scipy import sparse
 from sklearn.metrics import silhouette_samples
-import scanpy as sc
 import matplotlib.pyplot as plt
+import scanpy as sc
+
+sc.settings.n_jobs=-1
 
 from gepdynamics import _utils
 from gepdynamics import _constants
@@ -80,16 +83,16 @@ GSE_dir = _utils.set_dir(data_dir.joinpath('GSE149563'))
 # %%
 # %%time
 
-# %time adata = sc.read(GSE_dir.joinpath('JZ_Mouse_TimeSeries.h5ad'))
+# %time adata = sc.read_h5ad(GSE_dir.joinpath('JZ_Mouse_TimeSeries.h5ad'))
 metadata = pd.read_csv(GSE_dir.joinpath('AllTimePoints_metadata.csv'), index_col=0)
 
 adata.obs['celltype'] = metadata.var_celltype
 adata.obs['compartment'] = metadata.var_compartment
 
 untransformed = sparse.csr_matrix(adata.obs.n_molecules.values[:, None].astype(np.float32) / 10_000).multiply(adata.X.expm1())
-adata.X = sparse.csc_matrix(untransformed).rint()
+adata.X = sparse.csr_matrix(untransformed).rint()
 
-del untransformed
+del untransformed, metadata
 
 adata
 
@@ -100,8 +103,12 @@ adata.obs.development_stage = adata.obs.development_stage.cat.rename_categories(
     ['E12', 'E15', 'E17', 'P3', 'P7', 'P15', 'P42'])
 
 # %%
-sc.pl.umap(adata, color=['development_stage', 'compartment'])
-sc.pl.umap(adata, color=['celltype'])
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
+    sc.pl.umap(adata, color=['development_stage', 'compartment'])
+    sc.pl.umap(adata, color=['celltype'])
 
 adata.uns['development_stage_colors_dict'] = dict(zip(adata.obs['development_stage'].cat.categories, adata.uns['development_stage_colors']))
 adata.uns['compartment_colors_dict'] = dict(zip(adata.obs['compartment'].cat.categories, adata.uns['compartment_colors']))
@@ -116,6 +123,18 @@ pd.crosstab(adata.obs.celltype, adata.obs.development_stage)
 # %%
 pd.crosstab(adata.obs.celltype, adata.obs.compartment)
 
+# %%
+adata.var['mt'] = adata.var_names.str.startswith('mt-')  # annotate the group of mitochondrial genes as 'mt'
+print(f"{np.sum(adata.var['mt'])} mitochondrial genes")
+sc.pp.calculate_qc_metrics(adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
+
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
+    sc.pl.violin(adata, ['n_genes', 'total_counts', 'pct_counts_mt',],
+                 jitter=0.4, multi_panel=True, groupby='development_stage')
+
 # %% [markdown]
 # ## 2. filtering genes, selecting joint highly variable genes (HVGs) and showing key statistics
 #
@@ -124,13 +143,16 @@ pd.crosstab(adata.obs.celltype, adata.obs.compartment)
 # %%time
 print(f'before filtering shape was {adata.X.shape}')
 
+# filtering cells with low number of genes
+sc.pp.filter_cells(adata, min_genes=500)
+
 # filtering genes with very low abundance
-sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 1000))
+sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 2000))
 
 # getting general statistics for counts abundance
 sc.pp.filter_genes(adata, min_counts=0)
 sc.pp.filter_cells(adata, min_counts=0)
-sc.pp.filter_cells(adata, min_genes=0)
+
 
 sc.pp.highly_variable_genes(adata, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
 
@@ -158,6 +180,271 @@ adata.var
 
 
 # %% [markdown]
+# ## Cleaning the data - doublet removal and bad classifications
+
+# %% [markdown]
+# ### Training VAE towards Solo doublet removal
+
+# %%
+import torch
+torch.set_float32_matmul_precision("high")
+
+# %%
+# %%time
+import scvi
+from lightning.fabric.utilities.warnings import PossibleUserWarning
+warnings.filterwarnings("ignore", category=PossibleUserWarning)
+
+# %%
+# %%time
+subdata = adata[:, adata.var.joint_highly_variable].copy()
+#scvi.model.SCVI.setup_anndata(subdata, batch_key='development_stage')
+#vae = scvi.model.SCVI(subdata, n_layers=3, n_hidden=256, n_latent=64, dispersion='gene-batch')
+
+scvi.model.SCVI.setup_anndata(subdata, labels_key='development_stage')
+vae = scvi.model.SCVI(subdata, n_layers=3, n_hidden=256, n_latent=64, dispersion='gene-label')
+
+vae
+
+# %%
+# %time vae.train(accelerator='gpu', train_size=0.8, validation_size=0.1, batch_size=128, max_epochs=200)
+# %time vae.train(accelerator='gpu', train_size=0.8, validation_size=0.1, batch_size=512, max_epochs=200)
+# %time vae.train(accelerator='gpu', train_size=0.8, validation_size=0.1, batch_size=256, max_epochs=200)
+vae
+
+# %%
+vae.history.keys()
+
+# %%
+plt.plot(vae.history['train_loss_epoch'])
+plt.plot(vae.history['reconstruction_loss_train'])
+
+
+# %%
+# model_dir = results_dir.joinpath("scvi_model_batches")
+model_dir = results_dir.joinpath("scvi_model_labels")
+
+if vae.is_trained:
+    vae.save(model_dir, overwrite=True)
+
+# vae = scvi.model.SCVI.load(model_dir, adata=adata[:, adata.var.joint_highly_variable].copy())
+vae
+
+# %%
+SCVI_LATENT_KEY = "X_scVI"
+
+latent = vae.get_latent_representation()
+adata.obsm[SCVI_LATENT_KEY] = latent
+latent.shape
+
+# %% [markdown]
+# Visualizing the SCVI latent space
+
+# %%
+# %%time
+sc.pp.neighbors(adata, use_rep=SCVI_LATENT_KEY)
+vae_adata = sc.tl.umap(adata, min_dist=0.3, copy=True)
+
+# %%
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore")
+    sc.pl.umap(vae_adata, color=['development_stage', 'compartment'])
+    sc.pl.umap(vae_adata, color=['celltype'])
+
+# %% [markdown]
+# ### Solo doublet prediction
+
+# %%
+stages = adata.obs.development_stage.cat.categories
+stages
+
+# %%
+adata.obs['doublet_softmax'] = np.nan
+
+# %%
+for stage in stages:
+    print(f'working on stage {stage}')
+
+    subdata = adata[adata.obs.development_stage==stage, adata.var.joint_highly_variable].copy()
+    
+    solo_batch = scvi.external.SOLO.from_scvi_model(
+        vae, subdata.copy(), doublet_ratio=20, n_layers=2)
+
+    # %time solo_batch.train(accelerator='gpu', train_size=0.8, validation_size=0.1, batch_size=128, max_epochs=600)
+    # %time solo_batch.train(accelerator='gpu', train_size=0.8, validation_size=0.1, batch_size=256, max_epochs=600)
+
+    df = solo_batch.predict()
+    df['softmax'] = np.exp(df['doublet'])/np.sum(np.exp(df[['singlet', 'doublet']]), axis=1)
+    df['prediction'] = np.where(df['softmax'] > 0.9, 'doublet', 'singlet')
+
+    print(df.prediction.value_counts())
+    
+    df.softmax.hist(bins=np.linspace(0,1,21))
+    
+    subdata.obs['prediction'] = df.prediction
+    subdata.obs['softmax'] = df.softmax
+    
+    print(pd.crosstab(subdata.obs.compartment, subdata.obs.prediction))
+    
+    comp = 'epi'
+    plot_dat = subdata[(subdata.obs.compartment==comp)]
+    dat = vae_adata[adata.obs.development_stage==stage]
+    
+    dat.obs['softmax'] = df.softmax
+    dat.obs['prediction'] = df.prediction
+    
+    print(pd.crosstab(plot_dat.obs.celltype, plot_dat.obs.prediction))
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore")
+
+        sc.pl.umap(plot_dat, color=['celltype'])
+        sc.pl.umap(plot_dat, color=['softmax', 'prediction'])
+        sc.pl.umap(subdata, color=['softmax', 'prediction'])
+        
+        sc.pl.umap(dat, color=['softmax', 'prediction'])
+    
+    adata.obs.loc[subdata.obs_names, 'doublet_softmax'] = subdata.obs.softmax
+
+
+# %%
+adata.obs['doublet_softmax'].hist(bins=np.linspace(0,1,21))
+plt.title('doublet softmax probability')
+sc.pl.umap(adata, color='doublet_softmax')
+
+# %%
+adata.obs['doublet'] = np.where(adata.obs['doublet_softmax'] > 0.9, 'doublet', 'singlet')
+sc.pl.umap(adata, color='doublet')
+
+# %%
+
+# %%
+adata.obs['doublet_softmax_r2'] = np.nan
+
+# %%
+# %%time
+r2_data = adata[adata.obs.doublet == 'singlet']
+
+for stage in stages:
+    print(f'working on stage {stage}')
+    
+    subdata = r2_data[r2_data.obs.development_stage==stage, r2_data.var.joint_highly_variable].copy()
+    solo_batch = scvi.external.SOLO.from_scvi_model(
+        vae, subdata.copy(), doublet_ratio=10, n_layers=2)
+
+    # %time solo_batch.train(accelerator='gpu', train_size=0.8, validation_size=0.1, batch_size=128, max_epochs=600)
+    # %time solo_batch.train(accelerator='gpu', train_size=0.8, validation_size=0.1, batch_size=256, max_epochs=600)
+
+    df = solo_batch.predict()
+    df['softmax'] = np.exp(df['doublet'])/np.sum(np.exp(df[['singlet', 'doublet']]), axis=1)
+    df['prediction'] = np.where(df['softmax'] > 0.9, 'doublet', 'singlet')
+
+    print(df.prediction.value_counts())
+    
+    df.softmax.hist(bins=np.linspace(0,1,21))
+    
+    subdata.obs['prediction'] = df.prediction
+    subdata.obs['softmax'] = df.softmax
+    
+    print(pd.crosstab(subdata.obs.compartment, subdata.obs.prediction))
+    
+    comp = 'epi'
+    plot_dat = subdata[(subdata.obs.compartment==comp)]
+    dat = vae_adata[adata.obs.development_stage==stage]
+    
+    dat.obs['softmax'] = df.softmax
+    dat.obs['prediction'] = df.prediction
+    
+    print(pd.crosstab(plot_dat.obs.celltype, plot_dat.obs.prediction))
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore")
+
+        sc.pl.umap(plot_dat, color=['celltype'])
+        sc.pl.umap(plot_dat, color=['softmax', 'prediction'])
+        sc.pl.umap(subdata, color=['softmax', 'prediction'])
+        
+        sc.pl.umap(dat, color=['softmax', 'prediction'])
+    
+    adata.obs.loc[subdata.obs_names, 'doublet_softmax_r2'] = subdata.obs.softmax
+
+# %%
+adata.obs['doublet_softmax_r2'].hist(bins=np.linspace(0,1,21))
+plt.title('doublet softmax round 2 probability')
+sc.pl.umap(adata, color='doublet_softmax_r2')
+
+# %%
+adata.obs['doublet'] = np.where((adata.obs['doublet_softmax'] > 0.9) | (adata.obs['doublet_softmax_r2'] > 0.9), 'doublet', 'singlet')
+sc.pl.umap(adata, color='doublet')
+
+# %%
+plt.scatter(adata.obs.doublet_softmax, adata.obs.doublet_softmax_r2, s=2)
+
+# %%
+no_doublets = adata[adata.obs.doublet == 'singlet']
+no_doublets = no_doublets[no_doublets.obs.compartment == 'epi']
+pd.crosstab(no_doublets.obs.celltype, no_doublets.obs.development_stage)
+
+# %% [markdown]
+# ### Silhouette
+
+# %%
+import warnings
+
+from sklearn.metrics import silhouette_samples
+
+
+# %%
+dat = adata[(adata.obs.doublet=='singlet')].copy()
+dat = dat[~dat.obs.celltype.str.startswith('unknown')]
+dat.shape
+
+# %%
+
+# %%
+dat.obs['silhouette_scvi_stage'] = np.nan
+
+# %%
+# %%time
+for stage in stages:
+    print('working on stage',stage)
+
+    stage_dat = dat[dat.obs.development_stage==stage]
+    silhouette = silhouette_samples(stage_dat.obsm['X_scVI'], stage_dat.obs[f'compartment'])
+    
+    dat.obs.loc[dat.obs.development_stage==stage, 'silhouette_scvi_stage'] = silhouette
+    stage_dat.obs['silhouette_scvi_stage'] = silhouette
+    print(silhouette.mean())
+    
+    sc.pl.umap(stage_dat[(stage_dat.obs.compartment==comp) ], color=['silhouette_scvi_stage'])
+    print(pd.crosstab(stage_dat.obs.compartment, stage_dat.obs.silhouette_scvi_stage<0))
+
+
+# %%
+dat.obs.silhouette_scvi_stage.hist(bins=np.linspace(-0.5,0.5,21))
+np.percentile(dat.obs.silhouette_scvi_stage, 5)
+
+# %%
+sc.pl.umap(dat, color=['silhouette_scvi_stage'])
+sc.pl.umap(dat[(dat.obs.compartment==comp) ], color=['silhouette_scvi_stage', 'doublet_softmax'])
+
+# %%
+dat2 = dat[dat.obs.silhouette_scvi_stage > np.percentile(dat.obs.silhouette_scvi_stage, 5)]
+
+# %%
+dat3 = dat2[(dat2.obs.celltype != 'unknown3') & (dat2.obs.compartment=='epi')]
+dat3.obs.celltype.value_counts()
+
+# %%
+for stage in stages:
+    print(stage)
+    sc.pl.umap(dat3[dat3.obs.development_stage==stage], color=['silhouette_scvi_stage'])
+
+# %%
+adata = adata[dat2.obs_names]
+adata
+
+# %% [markdown]
 # ### Saving/loading the pre-processed object
 
 # %%
@@ -169,6 +456,9 @@ if not pre_processed_adata_file.exists():
 else:
     adata = sc.read(pre_processed_adata_file)
 adata
+
+# %%
+pd.crosstab(adata.obs.celltype, adata.obs.development_stage)
 
 # %% [markdown]
 # ## 3. Subsetting and splitting the dataset by stage, and selecting joint highly variable genes (HVG)
@@ -182,10 +472,10 @@ adata
 
 column_of_interest = 'development_stage'
 
-subset_adata_file = results_dir.joinpath('subset.h5ad')
+subset_adata_file = results_dir.joinpath('epi_subset.h5ad')
 
 if not subset_adata_file.exists():
-    subset = adata[(adata.obs.compartment == 'epi') & (adata.obs.celltype != 'unknown3')].copy()
+    subset = adata[adata.obs.compartment == 'epi'].copy()
 
     sc.pp.filter_genes(subset, min_cells=1)
     sc.pp.filter_genes(subset, min_counts=1)
@@ -236,7 +526,7 @@ for cat in categories:
 
         del tmp
     else:
-        print(f'loading {cat}')
+        print(f'{cat} split adata exists')
 
 # %% [markdown]
 # ## 4. Running consensus NMF iterations
@@ -245,9 +535,16 @@ for cat in categories:
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 
 # %%
+tmp.var[tmp.var.n_cells > (tmp.shape[0]/100)][tmp.var.joint_highly_variable]
+
+# %%
+X = 
+X.shape
+
+# %%
 # %%time
 
-ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]#, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] #, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 
 for cat in categories:
     print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
@@ -256,10 +553,10 @@ for cat in categories:
     c_object = cnmf.cNMF(cnmf_dir, cat)
     
     # Variance normalized version of the data
-    X = sc.pp.scale(tmp.X[:, tmp.var.joint_highly_variable].toarray().astype(np.float32), zero_center=False)
+    X = _utils.subset_and_normalize_for_nmf(tmp)
     
-    c_object.prepare(X, ks, n_iter=100, new_nmf_kwargs={'tol': _constants.NMF_TOLERANCE,
-                                                        'beta_loss': 'kullback-leibler'})
+    c_object.prepare(X, ks, n_iter=120, new_nmf_kwargs={
+        'tol': _constants.NMF_TOLERANCE, 'beta_loss': 'kullback-leibler', 'max_iter': 1000})
     
     c_object.factorize(0, 1, gpu=True)
     
@@ -272,7 +569,7 @@ for cat in categories:
 for cat in categories:
     print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
     c_object = cnmf.cNMF(cnmf_dir, cat)
-    for thresh in [0.5, 0.4, 0.3]:
+    for thresh in [0.5, 0.4]:
         print(f'working on threshold {thresh}')
         c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=1000, 
                                   consensus_method='mean',
@@ -308,22 +605,11 @@ selected_cnmf_params
 # %%
 # %%time
 
-# selected_cnmf_params = {
-#     'E12': (6, 0.5),  # 
-#     'E15': (7, 0.5),  # 
-#     'E17': (5, 0.5),   # 
-#     'P3': (5, 0.5),    # 
-#     'P7': (6, 0.5),   # 
-#     'P15': (4, 0.5),  # 
-#     'P42': (5, 0.5)}   # 
-
 split_adatas = {}
 
 for cat, (k, threshold) in selected_cnmf_params.items():
     print(f'Working on epi {cat} with k={k} and threshold={threshold}')
-    # %time tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
-
-    tmp.var.joint_highly_variable = subset.var.joint_highly_variable
+    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
     
     c_object = cnmf.cNMF(cnmf_dir, cat)
     c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
@@ -339,9 +625,9 @@ for cat, (k, threshold) in selected_cnmf_params.items():
     usages_norm = usages / np.sum(usages, axis=1, keepdims=True)
     tmp.obsm['usages_norm'] = usages_norm
 
-    # get per gene z-score of data after TPM normalization and log1p transformation 
+    # get per gene z-score of data after cp10k normalization and log1p transformation 
     tpm_log1p_zscore = tmp.X.toarray()
-    tpm_log1p_zscore /= 1e-6 * np.sum(tpm_log1p_zscore, axis=1, keepdims=True)
+    tpm_log1p_zscore /= 1e-4 * np.sum(tpm_log1p_zscore, axis=1, keepdims=True)
     tpm_log1p_zscore = np.log1p(tpm_log1p_zscore)
     tpm_log1p_zscore = sc.pp.scale(tpm_log1p_zscore)
 
@@ -354,6 +640,7 @@ for cat, (k, threshold) in selected_cnmf_params.items():
     split_adatas[cat] = tmp
 
     tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
+    print()
 
 
 # %% [markdown]
@@ -361,6 +648,8 @@ for cat, (k, threshold) in selected_cnmf_params.items():
 
 # %%
 # %%time
+
+split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
 
 split_adatas = {}
 for cat in categories:
@@ -376,27 +665,31 @@ for cat in categories:
 # %%
 decomposition_images = _utils.set_dir(split_adatas_dir.joinpath("images"))
 
-for cat in categories:
-    epidata = sc.read_h5ad(split_adatas_dir.joinpath(f"{cat}.h5ad"))
-    
-    # UMAP
-    um = sc.pl.umap(epidata, color='celltype', s=10, return_fig=True, title=f'{cat} epithelial')
-    plt.tight_layout()
-    um.savefig(decomposition_images.joinpath(f"epi_{cat}_umap_celltype.png"), dpi=300)
-    plt.close(um)
+with warnings.catch_warnings():  # supress scanpy plotting warning
+    warnings.simplefilter(action='ignore', category=UserWarning)
+    warnings.simplefilter(action='ignore', category=FutureWarning)
 
-    # usages clustermap
-    un_sns = _utils.plot_usages_norm_clustermaps(
-        epidata, title=f'{cat}', show=False,sns_clustermap_params={
-            'row_colors': epidata.obs['celltype'].map(epidata.uns['celltype_colors_dict'])})
-    un_sns.savefig(decomposition_images.joinpath(f"{cat}_usages_norm.png"),
-                   dpi=180, bbox_inches='tight')
-    plt.close(un_sns.fig)
+    for cat in categories:
+        epidata = sc.read_h5ad(split_adatas_dir.joinpath(f"{cat}.h5ad"))
 
-    # usages violin plot
-    _utils.plot_usages_norm_violin(
-        epidata, 'celltype', save_path=decomposition_images.joinpath(
-            f'{cat}_norm_usage_per_lineage.png'))
+        # UMAP
+        um = sc.pl.umap(epidata, color='celltype', s=10, return_fig=True, title=f'{cat} epithelial')
+        plt.tight_layout()
+        um.savefig(decomposition_images.joinpath(f"epi_{cat}_umap_celltype.png"), dpi=300)
+        plt.close(um)
+
+        # usages clustermap
+        un_sns = _utils.plot_usages_norm_clustermaps(
+            epidata, title=f'{cat}', show=False,sns_clustermap_params={
+                'row_colors': epidata.obs['celltype'].map(epidata.uns['celltype_colors_dict'])})
+        un_sns.savefig(decomposition_images.joinpath(f"{cat}_usages_norm.png"),
+                       dpi=180, bbox_inches='tight')
+        plt.close(un_sns.fig)
+
+        # usages violin plot
+        _utils.plot_usages_norm_violin(
+            epidata, 'celltype', save_path=decomposition_images.joinpath(
+                f'{cat}_norm_usage_per_lineage.png'))
 
 
 # %% [markdown]
@@ -436,7 +729,7 @@ pairs = [(categories[i], categories[i + 1]) for i in range(len(categories) - 1)]
 
 for cat_a, cat_b in pairs:
     print(f'comparing {cat_a} and {cat_b}')
-    comparison_dir = _utils.set_dir(results_dir.joinpath(f"same_genes_{cat_a}_{cat_b}"))
+    comparison_dir = _utils.set_dir(results_dir.joinpath(f"comparator_{cat_a}_{cat_b}"))
     
     adata_a = split_adatas[cat_a]
     adata_b = split_adatas[cat_b]
@@ -446,7 +739,8 @@ for cat_a, cat_b in pairs:
     # else:
     cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir,
                                 'torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
-                               highly_variable_genes='joint_highly_variable')
+                               highly_variable_genes='joint_highly_variable',
+                               tpm_target_sum=10_000)
 
     print('decomposing')
     cmp.extract_geps_on_jointly_hvgs()
@@ -485,5 +779,3 @@ for cat_a, cat_b in pairs:
     cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
 
 
-
-# %%
