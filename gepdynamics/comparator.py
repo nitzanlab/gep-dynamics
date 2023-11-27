@@ -610,6 +610,7 @@ class Comparator(object):
             Level of verbosity for logging. Valid values are 0 (no logging),
             1 (minimal logging), and 2 (detailed logging). Defaults to 0.
         """
+
         self.adata_a = adata_a
         self.usages_matrix_a = usages_matrix_a
         self.rank_a = self.usages_matrix_a.shape[1]
@@ -641,6 +642,7 @@ class Comparator(object):
 
         # Fields to be filled in later
         self.geps_a = None
+        self.mask_b_genes = None
         self.a_result = None
         self.fnmf_result = None
         self.pfnmf_results = []
@@ -757,13 +759,15 @@ class Comparator(object):
         new_instance.adata_b = adata_b
         return new_instance
 
-    def _normalize_adata_for_decomposition(self, adata: sc.AnnData, method='variance') -> np.ndarray:
+    def _normalize_adata_for_decomposition(self, adata: sc.AnnData,
+                                           method='variance',
+                                           min_cell_per_gene_percent: float = 1.) -> np.ndarray:
         """
         Normalize adata for decomposition, fit the data type to `self.usages_matrix_a.dtype`.
         """
         if method == 'variance':
             normalized = _utils.subset_and_normalize_for_nmf(
-                adata, subset_by=self.joint_hvgs, min_cells_percent=1.,
+                adata, subset_by=self.joint_hvgs, min_cells_percent=min_cell_per_gene_percent,
                 dtype=self.usages_matrix_a.dtype)
             return normalized
 
@@ -864,12 +868,16 @@ class Comparator(object):
         if self.verbosity > 0:
             print(f'Extracting A GEPs on jointly highly variable genes')
 
-        X_a = self._normalize_adata_for_decomposition(self.adata_a)
+        X_a = self._normalize_adata_for_decomposition(self.adata_a, 'variance', 0 )
 
         self.a_result = self._run_nmf_with_known_usages(
             self.usages_matrix_a, X_a, 'A')
 
         self.geps_a = self.a_result.H / np.linalg.norm(self.a_result.H, ord=2, axis=1, keepdims=True)
+
+        min_cells = (self.adata_b.shape[0] * 1. / 100)
+        self.mask_b_genes = np.count_nonzero(
+            self.adata_b[:, self.joint_hvgs].X, axis=0) > min_cells
 
         # calculate gene coefs for each GEP
         self._calculate_gene_coefficients(self.adata_a, [self.a_result], self.tpm_target_sum)
@@ -967,7 +975,6 @@ class Comparator(object):
         -----
         Updates the object state to DECOMPOSED upon successful completion.
 
-        # TBD: add normalization option
         """
         if self.stage == Stage.INITIALIZED:
             raise RuntimeError('Must extract GEPs on jointly HVGs first')
@@ -1021,7 +1028,7 @@ class Comparator(object):
 
         # X_b ~ W @ geps_a
         nmf_kwargs = {
-            'H': self.geps_a.copy(),
+            'H': self.geps_a[:, self.mask_b_genes].copy(),
             'update_H': False,
             'n_components': self.rank_a,
             'tol': NMF_TOLERANCE,
@@ -1100,7 +1107,7 @@ class Comparator(object):
 
             for repeat in range(repeats):
                 w1, h1, w2, h2, n_iter = pfnmf.pfnmf(
-                    X_b.T, self.geps_a.T, rank_2=added_rank,
+                    X_b.T, self.geps_a[:, self.mask_b_genes].T, rank_2=added_rank,
                     beta_loss=self.beta_loss, tol=NMF_TOLERANCE,
                     max_iter=self.max_nmf_iter, verbose=(self.verbosity > 1))
 

@@ -456,7 +456,7 @@ def subset_and_normalize_for_nmf(adata: sc.AnnData,
     elif isinstance(subset_by, str):
         X = adata.X[:, adata.var[subset_by]].copy()
     elif isinstance(subset_by, Iterable):
-        X = adata.X[:, subset_by].copy()
+        X = adata[:, subset_by].X.copy()
     
     if isinstance(X, sparse.spmatrix):
         X = X.toarray()
