@@ -757,14 +757,15 @@ class Comparator(object):
         new_instance.adata_b = adata_b
         return new_instance
 
-    def _normalize_adata_for_decomposition(self, adata: sc.AnnData, method='variance') -> sc.AnnData:
+    def _normalize_adata_for_decomposition(self, adata: sc.AnnData, method='variance') -> np.ndarray:
         """
         Normalize adata for decomposition, fit the data type to `self.usages_matrix_a.dtype`.
         """
         if method == 'variance':
-            normalized = sc.pp.scale(adata[:, self.joint_hvgs].X.toarray(), zero_center=False)
-
-        return normalized.astype(self.usages_matrix_a.dtype)
+            normalized = _utils.subset_and_normalize_for_nmf(
+                adata, subset_by=self.joint_hvgs, min_cells_percent=1.,
+                dtype=self.usages_matrix_a.dtype)
+            return normalized
 
     def _run_nmf_with_known_usages(self,
                                    usages_matrix: np.ndarray,

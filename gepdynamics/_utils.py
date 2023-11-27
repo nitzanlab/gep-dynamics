@@ -8,6 +8,7 @@ import warnings
 
 from copy import deepcopy
 from pathlib import Path
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
@@ -446,11 +447,16 @@ def calculate_anndata_object_density(adata: sc.AnnData):
     return non_zeros / (adata.shape[0] * adata.shape[1])
 
 
-def subset_and_normalize_for_nmf(adata, var_key='joint_highly_variable', min_cells_percent=1., dtype=np.float32) -> np.ndarray:
-    if var_key is None:
+def subset_and_normalize_for_nmf(adata: sc.AnnData,
+                                 subset_by='joint_highly_variable',
+                                 min_cells_percent: float = 1.,
+                                 dtype=np.float32) -> np.ndarray:
+    if subset_by is None:
         X = adata.X.copy()
-    else:
-        X = adata.X[:, adata.var[var_key]].copy()
+    elif isinstance(subset_by, str):
+        X = adata.X[:, adata.var[subset_by]].copy()
+    elif isinstance(subset_by, Iterable):
+        X = adata.X[:, subset_by].copy()
     
     if isinstance(X, sparse.spmatrix):
         X = X.toarray()
