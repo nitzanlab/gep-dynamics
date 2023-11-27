@@ -862,22 +862,27 @@ class Comparator(object):
             self.joint_hvgs = joint_hvg_rank.sort_values()[: self.joint_hvgs].index
         elif isinstance(self.joint_hvgs, str):
             self.joint_hvgs = self.adata_a.var.index[self.adata_a.var[self.joint_hvgs]]
+        elif isinstance(self.joint_hvgs, pd.core.indexes.base.Index):
+            pass
         else:
             raise TypeError(f"joint_hvgs must be either int or a key in `adata_a.var`")
 
         if self.verbosity > 0:
             print(f'Extracting A GEPs on jointly highly variable genes')
 
-        X_a = self._normalize_adata_for_decomposition(self.adata_a, 'variance', 0 )
+        X_a = self._normalize_adata_for_decomposition(self.adata_a, 'variance', -1 )
 
         self.a_result = self._run_nmf_with_known_usages(
             self.usages_matrix_a, X_a, 'A')
 
         self.geps_a = self.a_result.H / np.linalg.norm(self.a_result.H, ord=2, axis=1, keepdims=True)
 
+        # create mask of low expressed genes
         min_cells = (self.adata_b.shape[0] * 1. / 100)
-        self.mask_b_genes = np.count_nonzero(
-            self.adata_b[:, self.joint_hvgs].X, axis=0) > min_cells
+        X = self.adata_b[:, self.joint_hvgs].X
+        if isinstance(X, _utils.sparse.spmatrix):
+            X = X.toarray()
+        self.mask_b_genes = np.count_nonzero(X, axis=0) > min_cells
 
         # calculate gene coefs for each GEP
         self._calculate_gene_coefficients(self.adata_a, [self.a_result], self.tpm_target_sum)
@@ -1077,7 +1082,7 @@ class Comparator(object):
                     f'Expected usage matrix rank {rank}, got {usages_matrices[added_rank].shape[1]}'
 
                 if self.verbosity > 0:
-                    print(f'Decomposing B de-novo, rank={rank}')
+                    print(f'Decomposing B de-novo with known usages, rank={rank}')
 
                 self.denovo_results.append(self._run_nmf_with_known_usages(
                     usages_matrices[added_rank], X_b, f'dn_{rank}', tens)
