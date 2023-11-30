@@ -258,7 +258,7 @@ class NMFResultBase(object):
         Plots heatmaps for the usage and gene coefficients correlations.
 
         Usages correlation is calculated as Pearson correlation. gene coefficients
-        correlation is calcualted as truncated spearman correlation with a cutoff
+        correlation is calculated as truncated spearman correlation with a cutoff
         of `tsc_truncation_level` genes.
 
         Parameters:
@@ -287,9 +287,11 @@ class NMFResultBase(object):
         elif not save:
             file_genes = None
             file_usage = None
+            file_H = None
         else:
             dec_folder = _utils.set_dir(saving_folder)
             file_genes = dec_folder.joinpath(f'{self.name}_correlations_gene_coefficients.png')
+            file_H = dec_folder.joinpath(f'{self.name}_correlations_H.png')
             file_usage = dec_folder.joinpath(f'{self.name}_correlations_usages.png')
 
         # parameters for genes heatmap
@@ -298,12 +300,20 @@ class NMFResultBase(object):
             index=self.prog_names, columns=self.prog_names)
         title_genes = f'{self.name} gene coefficients truncated spearman correlation'
 
+        # parameters for H heatmap
+        df_H = pd.DataFrame(np.corrcoef(self.H, rowvar=True),
+                            index=self.prog_names, columns=self.prog_names)
+        title_H = f'{self.name} programs matrix correlations'
+
         # parameters for usages heatmap
         df_usages = pd.DataFrame(np.corrcoef(self.norm_usages, rowvar=False),
                           index=self.prog_names, columns=self.prog_names)
         title_usage = f'{self.name} usages correlation'
 
-        for df, title, file in [(df_genes, title_genes, file_genes), (df_usages, title_usage, file_usage)]:
+        for df, title, file in [
+            (df_genes, title_genes, file_genes),
+            (df_usages, title_usage, file_usage),
+            (df_H, title_H, file_H)]:
             g = sns.heatmap(df, cmap='RdYlGn', annot=True, fmt='.2f', vmin=0,
                             vmax=1, square=True, cbar_kws={"shrink": (1 - 0.01*self.rank)})
             g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right')
@@ -496,6 +506,7 @@ class PFNMFResult(NMFResultBase):
         self.W2 = W2
         self.H1 = H1
         self.H2 = H2
+        self.H = np.concatenate([H1, H2], axis=0)
 
         usages = np.concatenate([W1, W2], axis=1)
         self.norm_usages = usages / usages.sum(axis=1, keepdims=True)
@@ -572,6 +583,7 @@ class Comparator(object):
                  max_added_rank: int = 3,
                  highly_variable_genes: Union[str, int] = NUMBER_HVG,
                  tpm_target_sum: int = 100_000,
+                 decomposition_normalization_method: str = 'variance',
                  device: str = None,
                  verbosity: int = 0
                  ):
@@ -604,6 +616,8 @@ class Comparator(object):
             target sum of transcript per (num) normalization as part of 
             calculating the gene coefficients (prior to log transform and
             z-scoring), by default 100,000
+        decomposition_normalization_method : str, optional
+            Normalization method for decomposition, by default 'variance'.
         device : str, optional
             Device to use for torch-based NMF engine, by default None.
         verbosity : int, optional
@@ -626,6 +640,7 @@ class Comparator(object):
         self.max_nmf_iter = max_nmf_iter
         self.max_added_rank = max_added_rank
         self.nmf_engine = nmf_engine
+        self.decomposition_normalization_method = decomposition_normalization_method
         self.device = device
 
         if isinstance(highly_variable_genes, str):
@@ -765,11 +780,12 @@ class Comparator(object):
         """
         Normalize adata for decomposition, fit the data type to `self.usages_matrix_a.dtype`.
         """
-        if method == 'variance':
-            normalized = _utils.subset_and_normalize_for_nmf(
-                adata, subset_by=self.joint_hvgs, min_cells_percent=min_cell_per_gene_percent,
-                dtype=self.usages_matrix_a.dtype)
-            return normalized
+
+        normalized = _utils.subset_and_normalize_for_nmf(
+            adata, subset_by=self.joint_hvgs, method=method,
+            min_cells_percent=min_cell_per_gene_percent,
+            dtype=self.usages_matrix_a.dtype)
+        return normalized
 
     def _run_nmf_with_known_usages(self,
                                    usages_matrix: np.ndarray,
@@ -870,7 +886,8 @@ class Comparator(object):
         if self.verbosity > 0:
             print(f'Extracting A GEPs on jointly highly variable genes')
 
-        X_a = self._normalize_adata_for_decomposition(self.adata_a, 'variance', -1 )
+        X_a = self._normalize_adata_for_decomposition(
+            self.adata_a, self.decomposition_normalization_method, -1)
 
         self.a_result = self._run_nmf_with_known_usages(
             self.usages_matrix_a, X_a, 'A')
@@ -984,7 +1001,8 @@ class Comparator(object):
         if self.stage == Stage.INITIALIZED:
             raise RuntimeError('Must extract GEPs on jointly HVGs first')
 
-        X_b = self._normalize_adata_for_decomposition(self.adata_b)
+        X_b = self._normalize_adata_for_decomposition(
+            self.adata_b, self.decomposition_normalization_method, -1)
 
         if self.nmf_engine == NMFEngine.sklearn:
             if self.verbosity > 0:

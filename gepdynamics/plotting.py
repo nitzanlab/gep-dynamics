@@ -30,17 +30,24 @@ def get_rank_from_coefs(orig_coefs, gene_indices, cutoff):
     return coefs
 
 
-def load_data_for_lung_dev_sanky():
+def load_data_for_lung_dev_sanky(zepp_results_dir: _utils.PathLike):
+    """
+    Load data for lung development dataset
+
+    >>> from gepdynamics.plotting import load_data_for_lung_dev_sanky
+    >>> adata_a, adata_b, adata_c = load_data_for_lung_dev_sanky(zepp_results_dir)
+
+    """
     import scanpy as sc
     from gepdynamics import _utils
 
-    results_dir = _utils.set_dir('results')
-    zepp_results_dir = _utils.set_dir(results_dir.joinpath('zepp'))
+    zepp_results_dir = _utils.set_dir(zepp_results_dir)
 
-    global adata_a, adata_b, adata_c
     adata_a = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"E12.h5ad"))
     adata_b = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"E15.h5ad"))
     adata_c = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"E17.h5ad"))
+
+    return adata_a, adata_b, adata_c
 
 
 def plot_sankey_for_lung_dev():
