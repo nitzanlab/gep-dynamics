@@ -450,7 +450,7 @@ def calculate_anndata_object_density(adata: sc.AnnData):
 
 def subset_and_normalize_for_nmf(adata: sc.AnnData,
                                  subset_by='joint_highly_variable',
-                                 method='variance',
+                                 method: typing.Literal['variance', 'variance_cap'] = 'variance',
                                  min_cells_percent: float = 1.,
                                  dtype=np.float32) -> np.ndarray:
     if subset_by is None:
@@ -472,9 +472,8 @@ def subset_and_normalize_for_nmf(adata: sc.AnnData,
         var = np.var(X, axis=0, ddof=1, dtype=np.float64).astype(dtype)
         var[var < 1] = 1
         return X / np.sqrt(var)
-
-
-
+    else:
+        raise NotImplementedError(f"Method {method} is not implemented")
 
 
 def _create_usages_norm_adata(adata, norm_usages: np.ndarray = None, prog_names: list = None):

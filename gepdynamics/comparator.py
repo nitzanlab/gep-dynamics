@@ -24,9 +24,10 @@ output:
 2. Fingerprint figure for each GEP in the timepoint A decomposition.
 
 """
-
 import os
+import numbers
 import resource
+import typing
 
 from copy import copy
 from typing import Tuple, Dict, Any, List, Union
@@ -583,7 +584,7 @@ class Comparator(object):
                  max_added_rank: int = 3,
                  highly_variable_genes: Union[str, int] = NUMBER_HVG,
                  tpm_target_sum: int = 100_000,
-                 decomposition_normalization_method: str = 'variance',
+                 decomposition_normalization_method: typing.Literal['variance', 'variance_cap'] = 'variance',
                  device: str = None,
                  verbosity: int = 0
                  ):
@@ -775,7 +776,7 @@ class Comparator(object):
         return new_instance
 
     def _normalize_adata_for_decomposition(self, adata: sc.AnnData,
-                                           method='variance',
+                                           method: typing.Literal['variance', 'variance_cap'] = 'variance',
                                            min_cell_per_gene_percent: float = 1.) -> np.ndarray:
         """
         Normalize adata for decomposition, fit the data type to `self.usages_matrix_a.dtype`.
@@ -832,7 +833,8 @@ class Comparator(object):
             W=H.T,
             H=W.T)
 
-    def extract_geps_on_jointly_hvgs(self, min_cells_per_gene: int = 5):
+    def extract_geps_on_jointly_hvgs(self, min_cells_per_gene: int = 5,
+                                     coefs_variance_normalization: typing.Literal[None, 'variances_norm'] = None):
         """
         Identify Gene Expression Programs (GEPs) on genes that are highly variable
         across both timepoints A and B.
@@ -852,6 +854,9 @@ class Comparator(object):
         min_cells_per_gene : int, optional
             Minimum number of cells in which a gene must be expressed to be considered in the analysis.
             This parameter is only used if `self.joint_hvgs` is an integer. Defaults to 5.
+        coefs_variance_normalization : typing.Literal[None, 'variances_norm'], optional
+            Whether to normalize the gene coefficients by the normalized variances
+            of the genes, by default None.
 
         Raises
         ------
@@ -902,7 +907,16 @@ class Comparator(object):
         self.mask_b_genes = np.count_nonzero(X, axis=0) > min_cells
 
         # calculate gene coefs for each GEP
-        self._calculate_gene_coefficients(self.adata_a, [self.a_result], self.tpm_target_sum)
+        if coefs_variance_normalization is None:
+            self._calculate_gene_coefficients(
+                self.adata_a, [self.a_result], self.tpm_target_sum)
+        elif coefs_variance_normalization == 'variances_norm':
+            var_norm = sc.pp.highly_variable_genes(
+                self.adata_a, flavor='seurat_v3', n_top_genes=5000,
+                inplace=False)['variances_norm'].values
+            self._calculate_gene_coefficients(
+                self.adata_a, [self.a_result], self.tpm_target_sum,
+                target_variance=var_norm)
 
         self.stage = Stage.PREPARED
 
@@ -971,7 +985,9 @@ class Comparator(object):
             plt.show()
         plt.close()
 
-    def decompose_b(self, repeats: int = 1, precalculated_denovo_usage_matrices: List[np.ndarray] = None):
+    def decompose_b(self, repeats: int = 1,
+                    precalculated_denovo_usage_matrices: List[np.ndarray] = None,
+                    coefs_variance_normalization: typing.Literal[None, 'variances_norm'] = None):
         """
         Decompose timepoint B data de-novo and using timepoint A GEP matrix with additional degrees of freedom.
 
@@ -985,6 +1001,9 @@ class Comparator(object):
             # TBD: add support for repeats > 1 in de-novo and fnmf (requires random initialization)
         precalculated_denovo_usage_matrices : List[np.ndarray], optional
             Pre-calculated usage matrices for de-novo decomposition, if available. Defaults to None.
+        coefs_variance_normalization : typing.Literal[None, 'variances_norm'], optional
+            Whether to normalize the gene coefficients by the normalized variances
+            of the genes, by default None.
 
         Raises
         ------
@@ -1037,7 +1056,17 @@ class Comparator(object):
 
         self._all_results = self.denovo_results + [self.fnmf_result] + self.pfnmf_results
 
-        self._calculate_gene_coefficients(self.adata_b, self._all_results, self.tpm_target_sum)
+        # calculate gene coefs for each GEP
+        if coefs_variance_normalization is None:
+            self._calculate_gene_coefficients(
+                self.adata_b, self._all_results, self.tpm_target_sum)
+        elif coefs_variance_normalization == 'variances_norm':
+            var_norm = sc.pp.highly_variable_genes(
+                self.adata_b, flavor='seurat_v3', n_top_genes=5000,
+                inplace=False)['variances_norm'].values
+            self._calculate_gene_coefficients(
+                self.adata_b, self._all_results, self.tpm_target_sum,
+                target_variance=var_norm)
 
         self.stage = Stage.DECOMPOSED
 
@@ -1688,13 +1717,22 @@ class Comparator(object):
     @staticmethod
     def _calculate_gene_coefficients(adata: sc.AnnData,
                                      results_list: List[NMFResultBase],
-                                     target_sum=100_000):
+                                     target_sum=100_000,
+                                     target_variance: typing.Union[float, np.ndarray, pd.Series] = 1.):
         """
         Calculate gene coefficients for all the newly decomposed GEPs
         """
+        max_value = 10
+
         z_scores = sc.pp.normalize_total(adata, target_sum=target_sum, inplace=False)['X']
         z_scores = sc.pp.log1p(z_scores)
-        z_scores = sc.pp.scale(z_scores, max_value=10)
+        if isinstance(target_variance, numbers.Number):
+            z_scores = sc.pp.scale(z_scores, max_value=max_value)
+            z_scores *= np.sqrt(target_variance)
+        else:
+            z_scores = sc.pp.scale(z_scores)
+            z_scores *= np.sqrt(target_variance)
+            z_scores[z_scores < max_value] = max_value
 
         for res in results_list:
             res.calculate_gene_coefs(z_scores, adata.var_names)

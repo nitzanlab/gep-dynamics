@@ -632,9 +632,9 @@ class cNMF():
         
         if not hasattr(self, 'X'):
             self.X = load_data_from_npz(self.paths['data'])
-            
-        _nmf_kwargs = yaml.load(
-            open(self.paths['nmf_run_parameters']), Loader=yaml.FullLoader)
+
+        with open(self.paths['nmf_run_parameters']) as file:
+            _nmf_kwargs = yaml.load(file, Loader=yaml.FullLoader)
 
         jobs_for_this_worker = worker_filter(
             range(len(run_params)), worker_i, total_workers)
@@ -844,8 +844,8 @@ class cNMF():
 
         # Obtain reconstructed count matrix by re-fitting usage,
         # and computing dot product: usage.dot(spectra)
-        refit_nmf_kwargs = yaml.load(
-            open(self.paths['nmf_run_parameters']), Loader=yaml.FullLoader)
+        with open(self.paths['nmf_run_parameters']) as file:
+            refit_nmf_kwargs = yaml.load(file, Loader=yaml.FullLoader)
         # yotamcon 2022-08-29 added optional nmf rounds (updating H), and 
         #  changed the error calculation to follow the cnmf running parameters.
         
