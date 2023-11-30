@@ -671,7 +671,6 @@ class Comparator(object):
 
         # Fields to be filled in later
         self.geps_a = None
-        self.mask_b_genes = None
         self.a_result = None
         self.fnmf_result = None
         self.pfnmf_results = []
@@ -911,12 +910,13 @@ class Comparator(object):
 
         self.geps_a = self.a_result.H / np.linalg.norm(self.a_result.H, ord=2, axis=1, keepdims=True)
 
-        # create mask of low expressed genes
-        min_cells = (self.adata_b.shape[0] * 1. / 100)
-        X = self.adata_b[:, self.joint_hvgs].X
-        if isinstance(X, _utils.sparse.spmatrix):
-            X = X.toarray()
-        self.mask_b_genes = np.count_nonzero(X, axis=0) > min_cells
+        # mask filtered genes from the data normalizatoin
+        if self.decomposition_normalization_method is None:
+            min_cells = (self.adata_b.shape[0] * 1. / 100)
+            X = self.adata_b[:, self.joint_hvgs].X
+            if isinstance(X, _utils.sparse.spmatrix):
+                X = X.toarray()
+            self.geps_a = self.geps_a[np.count_nonzero(X, axis=0) > min_cells]
 
         # calculate gene coefs for each GEP
         if self.coefs_variance_normalization is None:
@@ -1091,7 +1091,7 @@ class Comparator(object):
 
         # X_b ~ W @ geps_a
         nmf_kwargs = {
-            'H': self.geps_a[:, self.mask_b_genes].copy(),
+            'H': self.geps_a.copy(),
             'update_H': False,
             'n_components': self.rank_a,
             'tol': NMF_TOLERANCE,
@@ -1170,7 +1170,7 @@ class Comparator(object):
 
             for repeat in range(repeats):
                 w1, h1, w2, h2, n_iter = pfnmf.pfnmf(
-                    X_b.T, self.geps_a[:, self.mask_b_genes].T, rank_2=added_rank,
+                    X_b.T, self.geps_a.T, rank_2=added_rank,
                     beta_loss=self.beta_loss, tol=NMF_TOLERANCE,
                     max_iter=self.max_nmf_iter, verbose=(self.verbosity > 1))
 
