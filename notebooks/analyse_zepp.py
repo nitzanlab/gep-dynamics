@@ -479,7 +479,8 @@ if not subset_adata_file.exists():
 
     sc.pp.filter_genes(subset, min_cells=1)
     sc.pp.filter_genes(subset, min_counts=1)
-
+    sc.pp.highly_variable_genes(subset, flavor='seurat_v3', n_top_genes=5000)
+    
     _utils.joint_hvg_across_stages(subset, obs_category_key=column_of_interest, n_top_genes=5000)
 
     subset.write(subset_adata_file)
@@ -521,6 +522,7 @@ for cat in categories:
         # correcting the gene counts
         sc.pp.filter_genes(tmp, min_cells=0)
         sc.pp.filter_genes(tmp, min_counts=0)
+        sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=5000)
 
         tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
@@ -537,7 +539,7 @@ cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 # %%
 # %%time
 
-ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] #, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]#, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 
 for cat in categories:
     print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
@@ -546,7 +548,7 @@ for cat in categories:
     c_object = cnmf.cNMF(cnmf_dir, cat)
     
     # Variance normalized version of the data
-    X = _utils.subset_and_normalize_for_nmf(tmp)
+    X = _utils.subset_and_normalize_for_nmf(tmp, method='variance_cap')
     
     c_object.prepare(X, ks, n_iter=120, new_nmf_kwargs={
         'tol': _constants.NMF_TOLERANCE, 'beta_loss': 'kullback-leibler', 'max_iter': 1000})
@@ -761,8 +763,9 @@ for cat_a, cat_b in pairs:
     
     cmp.print_errors()
     
-    cmp.examine_adata_a_decomposition_on_jointly_hvgs()
-    cmp.examine_adata_b_decompositions()
+    cmp.examine_adata_a_decomposition_on_jointly_hvgs(35, 3500)
+    cmp.examine_adata_b_decompositions(3500, 35, 3500)
+    
     cmp.plot_decomposition_comparisons()
     
     cmp.calculate_fingerprints()
@@ -770,11 +773,39 @@ for cat_a, cat_b in pairs:
     print('running GSEA')
     cmp.run_gsea(gprofiler_kwargs=dict(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
 
+    marker_genes = ['Krt8', 'Hopx', 'Klf6', 'Aqp5', 'Sftpa1', 'Sftpb', 'Sftpc',
+                'Mki67', 'Top2a', 'Rrm1', 'Rrm2',
+                'Sox2', 'Scgb3a2', 'Foxj1', 'Dynlrb2', 'Hoxa5', 'Col5a2', ]
+    
+    cmp.plot_marker_genes_heatmaps(marker_genes)
+    
+    cmp.plot_usages_violin('celltype', show=False)
+    
     cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
 
 
 
 # %%
-cmp.run_gsea(gprofiler_kwargs=dict(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
 
-cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
+marker_genes = ['Krt8', 'Hopx', 'Klf6', 'Aqp5', 'Sftpa1', 'Sftpb', 'Sftpc',
+            'Mki67', 'Top2a', 'Rrm1', 'Rrm2',
+            'Sox2', 'Scgb3a2', 'Foxj1', 'Dynlrb2', 'Hoxa5', 'Col5a2', ]
+
+
+for cat_a, cat_b in pairs:
+    print(f'comparing {cat_a} and {cat_b}')
+    comparison_dir = _utils.set_dir(results_dir.joinpath(f"comparator_{cat_a}_{cat_b}"))
+    
+    adata_a = split_adatas[cat_a]
+    adata_b = split_adatas[cat_b]
+    
+    cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        cmp.examine_adata_a_decomposition_on_jointly_hvgs(35, 3500)
+        cmp.examine_adata_b_decompositions(3500, 35, 3500)
+        # cmp.plot_usages_violin('celltype', show=False)
+        
+    cmp.plot_marker_genes_heatmaps(marker_genes)
+    

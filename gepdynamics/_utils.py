@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from seaborn import axisgrid as axisgrid
 import h5py
 import scanpy as sc
 
@@ -333,7 +334,7 @@ def floats_to_colors(floats_array: np.ndarray, cmap: str = 'coolwarm', vmin=None
     np.ndarray
         Array of hexadecimal color codes corresponding to each float value in the input array.
     """    
-    cmap = plt.matplotlib.cm.get_cmap(cmap)
+    cmap = plt.matplotlib.colormaps.get_cmap(cmap)
     norm = plt.matplotlib.colors.Normalize(vmin=(vmin or floats_array.min()), vmax=(vmax or floats_array.max()))
     rgba_colors = cmap(norm(floats_array))
     
@@ -573,7 +574,7 @@ def plot_usages_norm_clustermaps(
     columns=None,
     title=None,
     show: bool=False,
-    sns_clustermap_params=None) -> sns.axisgrid._BaseGrid:
+    sns_clustermap_params=None) -> axisgrid._BaseGrid:
     '''
     Plots the normalized usages clustermaps, return sns figure object
     '''
