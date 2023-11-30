@@ -585,6 +585,7 @@ class Comparator(object):
                  highly_variable_genes: Union[str, int] = NUMBER_HVG,
                  tpm_target_sum: int = 100_000,
                  decomposition_normalization_method: typing.Literal['variance', 'variance_cap'] = 'variance',
+                 coefs_variance_normalization: typing.Literal[None, 'variances_norm'] = None,
                  device: str = None,
                  verbosity: int = 0
                  ):
@@ -618,7 +619,18 @@ class Comparator(object):
             calculating the gene coefficients (prior to log transform and
             z-scoring), by default 100,000
         decomposition_normalization_method : str, optional
-            Normalization method for decomposition, by default 'variance'.
+            The normalization method for decomposition. This parameter accepts
+            one of the following string values:
+            - 'variance': Use variance-based normalization (var==1).
+            - 'variance_cap': Capped variance-based normalization (var<=1).
+            By default 'variance'
+        coefs_variance_normalization : typing.Literal[None, 'variances_norm'], optional
+            The normalization method for gene coefficients. This parameter
+            accepts two literal values:
+            - None: z-scoring based gene coefficients (var==1).
+            - 'variances_norm': Normalize gene coefficients using seurat V3
+              normalized variances as the target (var=normalized variance).
+            By default None
         device : str, optional
             Device to use for torch-based NMF engine, by default None.
         verbosity : int, optional
@@ -642,6 +654,7 @@ class Comparator(object):
         self.max_added_rank = max_added_rank
         self.nmf_engine = nmf_engine
         self.decomposition_normalization_method = decomposition_normalization_method
+        self.coefs_variance_normalization = coefs_variance_normalization
         self.device = device
 
         if isinstance(highly_variable_genes, str):
@@ -833,8 +846,7 @@ class Comparator(object):
             W=H.T,
             H=W.T)
 
-    def extract_geps_on_jointly_hvgs(self, min_cells_per_gene: int = 5,
-                                     coefs_variance_normalization: typing.Literal[None, 'variances_norm'] = None):
+    def extract_geps_on_jointly_hvgs(self, min_cells_per_gene: int = 5):
         """
         Identify Gene Expression Programs (GEPs) on genes that are highly variable
         across both timepoints A and B.
@@ -907,10 +919,10 @@ class Comparator(object):
         self.mask_b_genes = np.count_nonzero(X, axis=0) > min_cells
 
         # calculate gene coefs for each GEP
-        if coefs_variance_normalization is None:
+        if self.coefs_variance_normalization is None:
             self._calculate_gene_coefficients(
                 self.adata_a, [self.a_result], self.tpm_target_sum)
-        elif coefs_variance_normalization == 'variances_norm':
+        elif self.coefs_variance_normalization == 'variances_norm':
             var_norm = sc.pp.highly_variable_genes(
                 self.adata_a, flavor='seurat_v3', n_top_genes=5000,
                 inplace=False)['variances_norm'].values
@@ -986,8 +998,7 @@ class Comparator(object):
         plt.close()
 
     def decompose_b(self, repeats: int = 1,
-                    precalculated_denovo_usage_matrices: List[np.ndarray] = None,
-                    coefs_variance_normalization: typing.Literal[None, 'variances_norm'] = None):
+                    precalculated_denovo_usage_matrices: List[np.ndarray] = None,):
         """
         Decompose timepoint B data de-novo and using timepoint A GEP matrix with additional degrees of freedom.
 
@@ -1057,10 +1068,10 @@ class Comparator(object):
         self._all_results = self.denovo_results + [self.fnmf_result] + self.pfnmf_results
 
         # calculate gene coefs for each GEP
-        if coefs_variance_normalization is None:
+        if self.coefs_variance_normalization is None:
             self._calculate_gene_coefficients(
                 self.adata_b, self._all_results, self.tpm_target_sum)
-        elif coefs_variance_normalization == 'variances_norm':
+        elif self.coefs_variance_normalization == 'variances_norm':
             var_norm = sc.pp.highly_variable_genes(
                 self.adata_b, flavor='seurat_v3', n_top_genes=5000,
                 inplace=False)['variances_norm'].values
