@@ -1731,8 +1731,8 @@ class Comparator(object):
             z_scores *= np.sqrt(target_variance)
         else:
             z_scores = sc.pp.scale(z_scores)
-            z_scores *= np.sqrt(target_variance)
             z_scores[z_scores < max_value] = max_value
+            z_scores *= np.sqrt(target_variance)
 
         for res in results_list:
             res.calculate_gene_coefs(z_scores, adata.var_names)
