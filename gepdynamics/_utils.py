@@ -468,12 +468,7 @@ def subset_and_normalize_for_nmf(adata: sc.AnnData,
         X = X[:, np.count_nonzero(X, axis=0) > min_cells]
         return sc.pp.scale(X, zero_center=False)
     elif method == 'variance_cap':
-        axis = 0
-        mean = np.mean(X, axis=axis, dtype=np.float64)
-        mean_sq = np.multiply(X, X).mean(axis=axis, dtype=np.float64)
-        var = mean_sq - mean ** 2
-        # enforce R convention (unbiased estimator) for variance
-        var *= X.shape[axis] / (X.shape[axis] - 1)
+        var = np.var(X, axis=0, ddof=1, dtype=np.float64).astype(dtype)
         var[var < 1] = 1
         return X / np.sqrt(var)
 
