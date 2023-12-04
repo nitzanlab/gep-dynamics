@@ -813,9 +813,13 @@ class cNMF():
         kmeans_model.fit(l2_spectra)
         # yotamcon 2022-08-29 added reordering of clusters by balancing 
         #   both the cluster's average siluoette and the log of the size
+        if k_clusters > 1:
+            silhouette = silhouette_samples(l2_spectra, kmeans_model.labels_)
+        else:
+            silhouette = np.ones(l2_spectra.shape[0])
+
         kmeans_clusters = pd.DataFrame(np.vstack(
-            [(kmeans_model.labels_ + 1),
-             silhouette_samples(l2_spectra, kmeans_model.labels_)]).T,
+            [(kmeans_model.labels_ + 1), silhouette]).T,
             index=l2_spectra.index, columns=['label', 'silhouette'])
         
         kmeans_clusters.label = kmeans_clusters.label.map(dict(zip(
@@ -839,8 +843,11 @@ class cNMF():
         consensus_spectra = consensus_spectra / row_norm[:, None]
 
         # Compute the silhouette score
-        stability = silhouette_score(
-            l2_spectra.values, kmeans_clusters.label, metric='euclidean')
+        if k_clusters > 1:
+            stability = silhouette_score(
+                l2_spectra.values, kmeans_clusters.label, metric='euclidean')
+        else:
+            stability = 1
 
         # Obtain reconstructed count matrix by re-fitting usage,
         # and computing dot product: usage.dot(spectra)
