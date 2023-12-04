@@ -1733,16 +1733,14 @@ class Comparator(object):
         """
         Calculate gene coefficients for all the newly decomposed GEPs
         """
-        max_value = 10
+        max_value = 20
 
         z_scores = sc.pp.normalize_total(adata, target_sum=target_sum, inplace=False)['X']
         z_scores = sc.pp.log1p(z_scores)
+        z_scores = sc.pp.scale(z_scores, max_value=max_value)
         if isinstance(target_variance, numbers.Number):
-            z_scores = sc.pp.scale(z_scores, max_value=max_value)
             z_scores *= np.sqrt(target_variance)
         else:
-            z_scores = sc.pp.scale(z_scores)
-            z_scores[z_scores < max_value] = max_value
             z_scores *= np.sqrt(target_variance)
 
         for res in results_list:
