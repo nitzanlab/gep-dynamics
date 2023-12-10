@@ -53,6 +53,22 @@ def fastols(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
     return np.dot(pseudo_inverse, Y)
 
 
+def project_simplex_points(points: np.ndarray) -> np.ndarray:
+    """ project points on the 3D simplex to a 2D equilateral triangle """
+    points = np.array(points)
+
+    if points.ndim == 1:
+        points = points.reshape(1, -1)
+    if points.shape[1] != 3:
+        raise ValueError("Points must be in 3D space")
+
+    center = np.array([[1/3, 1/3, 1/3]])
+    rotation_matrix = np.array([[np.sqrt(2)/2, 0, -np.sqrt(2)/2], [0, np.sqrt(6), 0]])
+
+    return (points - center) @ rotation_matrix.T
+
+
+
 def truncated_spearmans_correlation(data, truncation_level: int = 1000,
                                     smaller_is_better: bool = False, rowvar: bool = True):
     """

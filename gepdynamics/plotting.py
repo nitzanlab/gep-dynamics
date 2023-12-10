@@ -66,7 +66,6 @@ def plot_sankey_for_lung_dev(adata_a, adata_b, adata_c,
     orig_coefs_b = adata_b.varm['usage_coefs'].copy()
     orig_coefs_c = adata_c.varm['usage_coefs'].copy()
 
-
     # getting background genes
     coefs = np.hstack([orig_coefs_a.values,
                        orig_coefs_b.values,
@@ -130,8 +129,8 @@ def plot_sankey_for_lung_dev(adata_a, adata_b, adata_c,
         link = dict(
           source = source, target = target, value = value, color=link_colors))])
 
-    fig.update_layout(title_text=f"Sankey Diagram for top {cutoff-1} prominent gene coefficients. "
-                                 f"Background is {len(bg_genes)} highly ranked genes (top {gene_list_cutoff-1} per program)"
+    fig.update_layout(title_text=f"Sankey Diagram for top {gene_list_cutoff-1} prominent gene coefficients. "
+                                 f"Background is {len(bg_genes)} highly ranked genes (top {cutoff-1} per program)"
                                  f", threshold={threshold_counts}", font_size=10)
     fig.show()
 
