@@ -7,7 +7,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.14.4
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -222,7 +222,7 @@ for time in times:
     
     tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
     
-    a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.highly_variable], n_comps=n_components, return_info=True)
+    # a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.highly_variable], n_comps=n_components, return_info=True)
     print(f'{time} - cummulative variance percentages:'),
     for i in range(n_components):
         print(f'{c[i]*100: .2f}', end='\t')

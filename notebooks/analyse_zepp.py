@@ -539,7 +539,7 @@ cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 # %%
 # %%time
 
-ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]#, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+ks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]#, 15]#, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 
 for cat in categories:
     print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
@@ -547,7 +547,7 @@ for cat in categories:
     
     c_object = cnmf.cNMF(cnmf_dir, cat)
     
-    # Variance normalized version of the data
+    # Variance-capped normalized version of the data
     X = _utils.subset_and_normalize_for_nmf(tmp, method='variance_cap')
     
     c_object.prepare(X, ks, n_iter=120, new_nmf_kwargs={
@@ -565,14 +565,14 @@ for cat in categories:
     print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
     c_object = cnmf.cNMF(cnmf_dir, cat)
     for thresh in [0.5, 0.4]:
-        print(f'working on threshold {thresh}')
+        print(f'working on threshold {thresh}:')
         c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=1000, 
                                   consensus_method='mean',
                                   close_fig=True, show_clustering=True, gpu=True)
         # printing the selected knee point
         df = cnmf.load_df_from_npz(c_object.paths['k_selection_stats_dt'] % c_object.convert_dt_to_str(thresh))
-        pos = len(df) - 4
-        for i in range(5):
+        pos = len(df) - 5
+        for i in range(5 + 1):
             print(cnmf.find_knee_point(df.prediction_error[:pos + i], df.k_source[:pos + i]), end=", ")
         print()
 
@@ -620,13 +620,17 @@ for cat, (k, threshold) in selected_cnmf_params.items():
     usages_norm = usages / np.sum(usages, axis=1, keepdims=True)
     tmp.obsm['usages_norm'] = usages_norm
 
-    # get per gene z-score of data after cp10k normalization and log1p transformation 
-    tpm_log1p_zscore = tmp.X.toarray()
-    tpm_log1p_zscore /= 1e-4 * np.sum(tpm_log1p_zscore, axis=1, keepdims=True)
-    tpm_log1p_zscore = np.log1p(tpm_log1p_zscore)
-    tpm_log1p_zscore = sc.pp.scale(tpm_log1p_zscore)
-
-    usage_coefs = _utils.fastols(usages_norm, tpm_log1p_zscore)
+    # Gene coefficients calculation:
+    # get per gene adjusted z-score of data after cp10k normalization and log1p transformation
+    max_log1p = 20
+    target_variance = sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=5000,
+                                                  inplace=False)['variances_norm'].values
+    z_scores = sc.pp.normalize_total(tmp, target_sum=10_000, inplace=False)['X']
+    z_scores = sc.pp.log1p(z_scores)
+    z_scores = sc.pp.scale(z_scores, max_value=max_log1p)
+    z_scores *= np.sqrt(target_variance)
+    
+    usage_coefs = _utils.fastols(usages_norm, z_scores)
 
     tmp.varm['usage_coefs'] = pd.DataFrame(
         usage_coefs.T, index=tmp.var.index,
@@ -719,7 +723,7 @@ for cat in categories:
 # %%
 # %%time
 
-cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
+cnmfcategories = _utils.set_dir(results_dir.joinpath('cnmf'))
 pairs = [(categories[i], categories[i + 1]) for i in range(len(categories) - 1)]
 
 for cat_a, cat_b in pairs:
@@ -729,14 +733,15 @@ for cat_a, cat_b in pairs:
     adata_a = split_adatas[cat_a]
     adata_b = split_adatas[cat_b]
     
-    if os.path.exists(comparison_dir.joinpath('comparator.npz')):
-        continue
+    # if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+        # continue
     #     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
     # else:
-    cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir,
-                                'torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
-                               highly_variable_genes='joint_highly_variable',
-                               tpm_target_sum=10_000)
+    cmp = comparator.Comparator(
+        adata_a, adata_a.obsm['usages'], adata_b, comparison_dir, 'torchnmf', device='cuda',
+        max_nmf_iter=1000, verbosity=1, highly_variable_genes='joint_highly_variable',
+        tpm_target_sum=10_000, decomposition_normalization_method='variance_cap',
+        coefs_variance_normalization='variances_norm')
 
     print('decomposing')
     cmp.extract_geps_on_jointly_hvgs()
@@ -786,11 +791,9 @@ for cat_a, cat_b in pairs:
 
 
 # %%
+# %%time
 
-marker_genes = ['Krt8', 'Hopx', 'Klf6', 'Aqp5', 'Sftpa1', 'Sftpb', 'Sftpc',
-            'Mki67', 'Top2a', 'Rrm1', 'Rrm2',
-            'Sox2', 'Scgb3a2', 'Foxj1', 'Dynlrb2', 'Hoxa5', 'Col5a2', ]
-
+pairs = [('E15', 'E12'), ('E17', 'E15')]
 
 for cat_a, cat_b in pairs:
     print(f'comparing {cat_a} and {cat_b}')
@@ -799,13 +802,58 @@ for cat_a, cat_b in pairs:
     adata_a = split_adatas[cat_a]
     adata_b = split_adatas[cat_b]
     
-    cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    # if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+        # continue
+    #     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    # else:
+    cmp = comparator.Comparator(
+        adata_a, adata_a.obsm['usages'], adata_b, comparison_dir, 'torchnmf', device='cuda',
+        max_nmf_iter=1000, verbosity=1, highly_variable_genes='joint_highly_variable',
+        tpm_target_sum=10_000, decomposition_normalization_method='variance_cap',
+        coefs_variance_normalization='variances_norm')
+
+    print('decomposing')
+    cmp.extract_geps_on_jointly_hvgs()
     
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=FutureWarning)
-        cmp.examine_adata_a_decomposition_on_jointly_hvgs(35, 3500)
-        cmp.examine_adata_b_decompositions(3500, 35, 3500)
-        # cmp.plot_usages_violin('celltype', show=False)
+    # getting cnmf results
+    c_object = cnmf.cNMF(cnmf_dir, cat_b)
+    usages_matrices_b = []
+    
+    threshold = adata_b.uns['cnmf_params']['threshold']
+    for k in range(cmp.rank_a, cmp.rank_a + cmp.max_added_rank + 1):
+        try:
+            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+        except FileNotFoundError:
+            print(f'Calculating consensus NMF for k={k} and threshold={threshold}')
+            c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                               consensus_method='mean',
+                               nmf_refitting_iters=1000, show_clustering=False)
+
+            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
         
+        usages_matrices_b.append(usages)
+    
+    cmp.decompose_b(repeats = 5, precalculated_denovo_usage_matrices=usages_matrices_b)
+    
+    cmp.print_errors()
+    
+    cmp.examine_adata_a_decomposition_on_jointly_hvgs(35, 3500)
+    cmp.examine_adata_b_decompositions(3500, 35, 3500)
+    
+    cmp.plot_decomposition_comparisons()
+    
+    cmp.calculate_fingerprints()
+    
+    print('running GSEA')
+    cmp.run_gsea(gprofiler_kwargs=dict(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
+
+    marker_genes = ['Krt8', 'Hopx', 'Klf6', 'Aqp5', 'Sftpa1', 'Sftpb', 'Sftpc',
+                'Mki67', 'Top2a', 'Rrm1', 'Rrm2',
+                'Sox2', 'Scgb3a2', 'Foxj1', 'Dynlrb2', 'Hoxa5', 'Col5a2', ]
+    
     cmp.plot_marker_genes_heatmaps(marker_genes)
     
+    cmp.plot_usages_violin('celltype', show=False)
+    
+    cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
+
