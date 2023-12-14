@@ -363,7 +363,7 @@ for name, ns in decompositions.items():
                        pd.Series(_utils.floats_to_colors(ns.loss_per_cell, cmap='RdYlGn_r', vmax=1200), name='residual', index=k_30.obs.index)], axis=1)
     
     un_sns = _utils.plot_usages_norm_clustermaps(k_30, normalized_usages=ns.norm_usages,
-        columns=ns.prog_labels_2l, title=title, show=True, sns_clustermap_params={
+                                                 prog_names=ns.prog_labels_2l, title=title, show=True, sns_clustermap_params={
             'col_colors': [coloring_scheme[name]] * ns.rank, 'row_colors': row_colors})
     
     plt.hist(ns.loss_per_cell, bins=20)
@@ -389,7 +389,7 @@ for dn_name, pf_name in zip(['dn_6', 'dn_7', 'dn_8', 'dn_9', 'dn_10'],
     joint_colors = [coloring_scheme[dn_name]] * ns0.rank + [coloring_scheme[pf_name]] * ns1.rank
 
     un_sns = _utils.plot_usages_norm_clustermaps(
-        k_30, normalized_usages=joint_usages, columns=joint_labels,
+        k_30, normalized_usages=joint_usages, prog_names=joint_labels,
         title=title, show=True, sns_clustermap_params={'col_colors': joint_colors})
     
     plt.plot([0, 2000], [0, 2000], 'r-')
@@ -433,7 +433,7 @@ ks, joint_prog_names, joint_usages, joint_labels, joint_colors = aggregate_ns_fi
 title = f'K_30 normalized usages of de-novo GEPs and k_12 GEPs {rank_k12} + [1, 2, 3] novel'
 
 un_sns = _utils.plot_usages_norm_clustermaps(
-    k_30, normalized_usages=joint_usages, columns=joint_labels, title=title,
+    k_30, normalized_usages=joint_usages, prog_names=joint_labels, title=title,
     show=True, sns_clustermap_params={'col_colors': joint_colors, 'figsize': (13, 13)})
 
 
@@ -624,7 +624,7 @@ genes_list = adata.var.loc[k_30.var.index, 'geneSymbol'].to_list()
 #
 # for index in range(k_12.varm['usage_coefs'].shape[1]):
 #     ordered_genes_index = k_12.varm['usage_coefs'].nlargest(
-#         columns=[k_12.varm['usage_coefs'].columns[index]], n=1000).index
+#         prog_names=[k_12.varm['usage_coefs'].prog_names[index]], n=1000).index
 #
 #     ordered_genes = k_12.var.loc[ordered_genes_index, 'geneSymbol'].to_list()
 #
@@ -632,7 +632,7 @@ genes_list = adata.var.loc[k_30.var.index, 'geneSymbol'].to_list()
 #         ordered_genes, ordered=True, background=adata.var.loc[k_12.var.index, 'geneSymbol'].to_list())
 #
 #     go_enrichment.to_csv(
-#         program_go_dir.joinpath(f"{k_12.varm['usage_coefs'].columns[index]}.csv"))
+#         program_go_dir.joinpath(f"{k_12.varm['usage_coefs'].prog_names[index]}.csv"))
 
 # %% magic_args="--no-raise-error false" language="script"
 #
@@ -641,7 +641,7 @@ genes_list = adata.var.loc[k_30.var.index, 'geneSymbol'].to_list()
 # for name, ns in decompositions.items():    
 #     for index in range(ns.rank):
 #         ordered_genes_index = ns.gene_coefs.nlargest(
-#             columns=[ns.prog_names[index]], n=1000).index
+#             prog_names=[ns.prog_names[index]], n=1000).index
 #         
 #         ordered_genes = adata.var.loc[ordered_genes_index, 'geneSymbol'].to_list()
 #         
@@ -676,7 +676,7 @@ for name, ns in decompositions.items():
 # for name, ns in decompositions.items():    
 #     for index in range(ns.rank):
 #         ordered_genes_index = ns.gene_coefs.nlargest(
-#             columns=[ns.prog_names[index]], n=1000).index
+#             prog_names=[ns.prog_names[index]], n=1000).index
 #         
 #         ordered_genes_index = ordered_genes_index[ordered_genes_index.isin(joint_HVG_geneID)]
 #         

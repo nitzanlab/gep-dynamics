@@ -1000,7 +1000,7 @@ class Comparator(object):
 
         un_sns = _utils.plot_usages_norm_clustermaps(
             self.adata_a, normalized_usages=res.norm_usages,
-            columns=col_labels, title=title, show=show,
+            prog_names=col_labels, title=title, show=show,
             sns_clustermap_params={'row_colors': row_colors})
 
         if save:
@@ -1340,7 +1340,7 @@ class Comparator(object):
 
             un_sns = _utils.plot_usages_norm_clustermaps(
                 self.adata_b, normalized_usages=res.norm_usages,
-                columns=col_labels, title=title, show=show,
+                prog_names=col_labels, title=title, show=show,
                 sns_clustermap_params={'row_colors': row_colors})
 
             if save:
@@ -1432,7 +1432,7 @@ class Comparator(object):
             joint_colors = ['#2ca02c'] * dn_res.rank + ['#d62728'] * pf_res.rank
 
             un_sns = _utils.plot_usages_norm_clustermaps(
-                self.adata_b, normalized_usages=joint_usages, columns=joint_labels,
+                self.adata_b, normalized_usages=joint_usages, prog_names=joint_labels,
                 title=title, show=show, sns_clustermap_params={'col_colors': joint_colors})
 
             if save:
@@ -1709,7 +1709,7 @@ class Comparator(object):
         Calculate the comparisons between de-novo and f/pfNMF GEPs.
         Performs GEP usages correlation  and TSC on the gene coefficients
 
-        for each rank of decomposition outputs a dataframe with the columns:
+        for each rank of decomposition outputs a dataframe with the prog_names:
         pfnmf_gep, dn_coef_gep, dn_coef_tsc, dn_usage_gep, dn_usage_corr
         """
         output = []
@@ -1752,7 +1752,7 @@ class Comparator(object):
         else:
             W, H, _ = sknmf.non_negative_factorization(x, **nmf_kwargs, verbose=verbose)
 
-        # X ~ W @ H, transpose for cells to be columns
+        # X ~ W @ H, transpose for cells to be prog_names
         loss_per_cell = pfnmf.calc_beta_divergence(
             x.T, H.T, np.zeros((H.shape[1], 0)),
             W.T, np.zeros((0, W.shape[0])), per_column=True)

@@ -23,7 +23,7 @@ def get_rank_from_coefs(orig_coefs, gene_indices, cutoff):
     """ create a dataframe of ranks up to cutoff from a dataframe of coefficients
     with unassigned column for genes that are equal between all programs"""
     coefs = orig_coefs.iloc[gene_indices].copy()
-    tmp_none = 1 - (coefs==0).all(axis=1).astype(int) # if all columns are zero set to 0 else 1
+    tmp_none = 1 - (coefs==0).all(axis=1).astype(int) # if all prog_names are zero set to 0 else 1
     coefs.loc[:,:] = rankdata(-coefs, axis=0)
     coefs[UNASSIGNED_COLUMN] = tmp_none * cutoff
     coefs[coefs > cutoff] = cutoff + 1

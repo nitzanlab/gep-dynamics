@@ -272,7 +272,7 @@ for time in times:
 
 #     tmp.varm['usage_coefs'] = pd.DataFrame(
 #         usage_coefs.T, index=tmp.var.index,
-#         columns=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
+#         prog_names=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
     
 #     split_adatas[time] = tmp
 

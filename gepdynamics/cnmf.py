@@ -31,18 +31,18 @@ from sklearn.metrics.pairwise import euclidean_distances
 
 
 def save_df_to_tsv(df: pd.DataFrame, filename):
-    '''Given a dataframe, save in a tsv file the data with index and columns'''
+    '''Given a dataframe, save in a tsv file the data with index and prog_names'''
     df.to_csv(filename, sep='\t')
 
 
 def save_df_to_npz(df: pd.DataFrame, filename):
-    '''Given a dataframe, save in npz format the data, index and columns'''
+    '''Given a dataframe, save in npz format the data, index and prog_names'''
     np.savez_compressed(filename, data=df.values, index=df.index.values,
                         columns=df.columns.values)
 
 
 def load_df_from_npz(filename):
-    '''Load a data frame saved as npz with (data, index, columns)'''
+    '''Load a data frame saved as npz with (data, index, prog_names)'''
     with np.load(filename, allow_pickle=True) as f:
         df = pd.DataFrame(**f)
     return df
@@ -86,7 +86,7 @@ def fast_ols_all_cols(X, Y):
 
 def fast_ols_all_cols_df(X: pd.DataFrame, Y: pd.DataFrame):
     '''fast, orthogonal least squares algorithm. Y=Xb
-    returning dataframe with rows from X's columns and coulmns from Y'''
+    returning dataframe with rows from X's prog_names and coulmns from Y'''
     beta = fast_ols_all_cols(X, Y)
     beta = pd.DataFrame(beta, index=X.columns, columns=Y.columns)
     return beta

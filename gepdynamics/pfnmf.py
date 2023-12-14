@@ -109,7 +109,7 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
     if beta_loss not in [1., 2. ]:
         raise NotImplementedError("pfnmf is only supported for beta in [1, 2]")
 
-    # Assert X has no zero rows or columns
+    # Assert X has no zero rows or prog_names
     m_features, n_samples = X.shape
     if np.count_nonzero(X.sum(axis=0)) != n_samples:
         raise ValueError(

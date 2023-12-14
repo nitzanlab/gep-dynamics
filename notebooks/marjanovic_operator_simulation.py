@@ -494,7 +494,7 @@ for name, ns in recompositions.items():
     prog_label_2l = [name + f'\n({prog_percent[i]: 0.1f}%)' for i, name in enumerate(orig_ns.nmf_prog_names)]
 
     un_sns = _utils.plot_usages_norm_clustermaps(subdata, normalized_usages=normalized_usages,
-        columns=prog_label_2l, title='', show=True, sns_clustermap_params={'figsize':(6, 6)})
+                                                 prog_names=prog_label_2l, title='', show=True, sns_clustermap_params={'figsize':(6, 6)})
 
     plt.close(un_sns.figure)
 
@@ -702,7 +702,7 @@ for name, ns in recompositions.items():
     prog_label_2l = [name + f'\n({prog_percent[i]: 0.1f}%)' for i, name in enumerate(ns.nmf_prog_names)]
 
     un_sns = _utils.plot_usages_norm_clustermaps(subdata, normalized_usages=normalized_usages,
-        columns=prog_label_2l, title='', show=True, sns_clustermap_params={'figsize':(6, 6)})
+                                                 prog_names=prog_label_2l, title='', show=True, sns_clustermap_params={'figsize':(6, 6)})
 
     plt.close(un_sns.figure)
 

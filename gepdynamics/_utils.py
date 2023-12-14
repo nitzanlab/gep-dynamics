@@ -133,7 +133,7 @@ def joint_hvg_across_stages(adata: sc.AnnData, obs_category_key: str, n_top_gene
 
     Modifies
     --------
-    Updates `adata.var` by adding two new columns:
+    Updates `adata.var` by adding two new prog_names:
     1. obs_category_key+'_max_var_norm' : numpy.ndarray
         Maximum normalized variance across stages/categories.
     2. 'joint_highly_variable' : numpy.ndarray
@@ -183,17 +183,17 @@ def read_matlab_h5_sparse(filename: PathLike) -> sparse.csr_matrix:
 
 def df_jaccard_score(df: pd.DataFrame) -> np.ndarray:
     """
-    Computes the Jaccard score between all pairs of boolean columns in a pandas DataFrame.
+    Computes the Jaccard score between all pairs of boolean prog_names in a pandas DataFrame.
 
     Parameters:
-        df (pd.DataFrame): The input pandas DataFrame. Must contain only boolean columns.
+        df (pd.DataFrame): The input pandas DataFrame. Must contain only boolean prog_names.
 
     Returns:
         np.ndarray: A symmetric matrix of shape (n_cols, n_cols) where each entry (i, j) represents
             the Jaccard score between column i and column j.
 
     Raises:
-        ValueError: If the input DataFrame contains non-boolean columns.
+        ValueError: If the input DataFrame contains non-boolean prog_names.
 
     Example:
         >>> import pandas as pd
@@ -211,7 +211,7 @@ def df_jaccard_score(df: pd.DataFrame) -> np.ndarray:
                [0.33333333, 0.        , 0.5       , 1.        ]])
     """
     if not all(df.dtypes == 'bool'):
-        raise ValueError('Input DataFrame must contain only boolean columns.')
+        raise ValueError('Input DataFrame must contain only boolean prog_names.')
     
     n_cols = len(df.columns)
     scores = np.zeros((n_cols, n_cols))
@@ -500,9 +500,9 @@ def _create_usages_norm_adata(adata, norm_usages: np.ndarray = None, prog_names:
         prog_names = adata.varm['usage_coefs'].columns
     var = pd.DataFrame(index=prog_names)
 
-    # make sure the length of prog_names is similar to the number of columns in norm_usages
+    # make sure the length of prog_names is similar to the number of prog_names in norm_usages
     assert len(prog_names) == norm_usages.shape[1], \
-        "The number of programs names is not equal to the number of columns in norm_usages"
+        "The number of programs names is not equal to the number of prog_names in norm_usages"
 
     with warnings.catch_warnings():  # supress 64 -> 32 float warning
         warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -593,19 +593,19 @@ def plot_usages_norm_clustermaps(
     adata: sc.AnnData,
     metric='cosine',
     normalized_usages=None,
-    columns=None,
+    prog_names=None,
     title=None,
     show: bool=False,
     sns_clustermap_params=None) -> axisgrid._BaseGrid:
-    '''
+    """
     Plots the normalized usages clustermaps, return sns figure object
-    '''
+    """
     
     if normalized_usages is None:
         normalized_usages = adata.obsm['usages_norm']
     
-    if columns is None:
-        columns = adata.varm['usage_coefs'].columns
+    if prog_names is None:
+        prog_names = adata.varm['usage_coefs'].columns
     
     if title is None:
         title = f'{adata.uns["name"]} programs normalized usages, k={normalized_usages.shape[1]}'
@@ -627,7 +627,7 @@ def plot_usages_norm_clustermaps(
     k = data.shape[1]
     
     un_sns = sns.clustermap(
-        pd.DataFrame(data, index=adata.obs.index, columns=columns),
+        pd.DataFrame(data, index=adata.obs.index, columns=prog_names),
         **default_clustermap_params)
     
     # Tick labels are set to match the square root transformation
