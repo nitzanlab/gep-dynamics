@@ -17,37 +17,45 @@
 # %% [markdown]
 # # Downloading, pre-processing and running cNMF on marjanovic et. al 2020 data
 # 1. Obtaining the data and creating AnnData object
-# 2. filtering genes and selecting joint highly variable genes (HVGs) and showing key statistics
-# 3. Splitting the dataset by timepoints, and selecting HVG per timepoint
+# 2. filtering genes, showing key statistics and selecting joint highly variable genes (jHVGs)
+# 3. Splitting the dataset by timepoints
 # 3. Running consensus NMF (cNMF) per timepoint
-# 4. Selecting parameters for the cNMF 
+# 4. Selecting parameters for the cNMF
+# 5. Running the comparator for adjacent time points
 #
 #
 
 # %%
 # %%time
+
+#debug jupyter:
 # %load_ext autoreload
 # %autoreload 2
 
-#debug:
+#debug IDE:
 from importlib import reload
 
 import sys
 import os
+import time
+import warnings
 from urllib.request import urlretrieve
 
 import numpy as np
 import pandas as pd
-import scanpy as sc
 import matplotlib.pyplot as plt
+import scanpy as sc
+
+sc.settings.n_jobs=-1
 
 from gepdynamics import _utils
 from gepdynamics import _constants
 from gepdynamics import cnmf
+from gepdynamics import pfnmf
+from gepdynamics import comparator
 
 _utils.cd_proj_home()
 print(os.getcwd())
-
 
 
 # %% [markdown]
@@ -56,9 +64,13 @@ print(os.getcwd())
 # %%
 # %%time
 results_dir = _utils.set_dir('results')
-orig_adata_path = results_dir.joinpath('marjanovic_mmLungPlate.h5ad')
+results_dir = _utils.set_dir(results_dir.joinpath('marjanovic'))
+data_dir = _utils.set_dir('data')
+
+orig_adata_path = data_dir.joinpath('marjanovic_mmLungPlate.h5ad')
 
 if not orig_adata_path.exists():  # create the original adata if it doesn't exist
+    print('Source AnnData object does not exist, creating it')
     # directories for file download:
     data_dir = _utils.set_dir('data')
     GSE_dir = _utils.set_dir(data_dir.joinpath('GSE154989'))
@@ -90,53 +102,61 @@ if not orig_adata_path.exists():  # create the original adata if it doesn't exis
     # reading the files
     sparse_counts = _utils.read_matlab_h5_sparse(f_rawCount)
     
-    gene_ids = pd.read_csv(f_geneTable, index_col=0)
+    gene_ids = pd.read_csv(f_geneTable, index_col=None)
+    gene_ids.index = gene_ids.ensgID.str.split('.').str[0]
+    gene_ids.index.name = None
     smp_ids = pd.read_csv(f_smpTable, index_col=0)
     smp_annotation = pd.read_csv(f_smp_annot, index_col=0)
     
     # constructing the adata
-    adata = sc.AnnData(X=sparse_counts, dtype=np.float32, var=gene_ids, obs=smp_ids)
+    adata = sc.AnnData(X=sparse_counts.astype(np.float32), var=gene_ids, obs=smp_ids)
+
+    # remove genes with 0 counts
+    adata = adata[:, adata.X.sum(axis=0) > 0].copy()
     
     adata.obs['clusterK12'] = smp_annotation.clusterK12.astype('category')
     
     adata.obsm['X_tsne'] = smp_annotation[['tSNE_1', 'tSNE_2']].values
     adata.obsm['X_phate'] = smp_annotation[['phate_1', 'phate_2']].values
     adata.write(orig_adata_path)
+
+    del sparse_counts, gene_ids, smp_ids, smp_annotation
 else:
-    adata = sc.read(orig_adata_path)
+    adata = sc.read_h5ad(orig_adata_path)
 
 adata
-# adata_norm_depth = sc.read(data_dir.joinpath('marjanovic_mmLungPlate_depth_normalized.h5ad'))
 
 
 
 # %%
-sc.external.pl.phate(adata, color=['timesimple', 'clusterK12'])
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
+    sc.external.pl.phate(adata, color=['clusterK12', 'timesimple'])
+
 adata.uns['timesimple_colors_dict'] = dict(zip(adata.obs['timesimple'].cat.categories, adata.uns['timesimple_colors']))
 adata.uns['clusterK12_colors_dict'] = dict(zip(adata.obs['clusterK12'].cat.categories, adata.uns['clusterK12_colors']))
 
 # %%
 pd.crosstab(adata.obs.timesimple, adata.obs.clusterK12)
 
-# %% [markdown]
-# ### Filter genes and plot basic statistics
-
 # %%
-# # filtering genes with very low abundance
-# sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 1000))
-# sc.pp.filter_genes(adata, min_counts=40)
-#
-# # getting general statistics for counts abundance
-# sc.pp.filter_cells(adata, min_counts=0)
-# sc.pp.filter_cells(adata, min_genes=0)
-#
-# sc.pp.highly_variable_genes(adata, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
-# adata
+adata.var['mt'] = adata.var.geneSymbol.str.startswith('mt-')  # annotate the group of mitochondrial genes as 'mt'
+print(f"{np.sum(adata.var['mt'])} mitochondrial genes")
+sc.pp.calculate_qc_metrics(adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
+
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
+    sc.pl.violin(adata, ['n_genes_by_counts', 'total_counts', 'pct_counts_mt'],
+                 jitter=0.4, multi_panel=True, groupby='timesimple')
 
 # %%
 column_of_interest = 'timesimple'
 
-stats_df = adata.obs.loc[:, [column_of_interest, 'n_genes', 'n_counts']].groupby(
+stats_df = adata.obs.loc[:, [column_of_interest, 'n_genes_by_counts', 'total_counts']].groupby(
     [column_of_interest]).median()
 
 stats_df = pd.concat([adata.obs.groupby([column_of_interest]).count().iloc[:, 0],
@@ -147,54 +167,174 @@ stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, yl
 plt.show()
 del column_of_interest, stats_df
 
+# %%
+sc.pl.highest_expr_genes(adata, n_top=20, gene_symbols='geneID')
+
+# %%
+# rRNA overlapping gene 
+sc.external.pl.phate(adata, color='ENSMUSG00000106106')
+
 # %% [markdown]
-# ### Splitting the adata by "timesimple", and creating a normalized variance layer
+# ### Filter genes and plot basic statistics
+# Cells with low number of genes were already filtered
+
+# %%
+# %%time
+print(f'before filtering shape was {adata.X.shape}')
+
+# filter cells with high amount of mitochondrial genes or extremely high counts
+adata = adata[(adata.obs.pct_counts_mt < 10) & (adata.obs.total_counts < 5E6)].copy()
+
+# filter ribosomal and mitochondrial genes:
+adata = adata[:, ~(adata.var.geneSymbol.str.contains('^mt-') |
+    adata.var.geneSymbol.str.contains('^Mrp[ls]\d') |
+    adata.var.geneSymbol.str.contains('^Rp[ls]\d') |
+    (adata.var_names == 'ENSMUSG00000106106'))].copy()
+
+# filtering genes with very low abundance
+sc.pp.filter_genes(adata, min_cells=np.round(adata.shape[0] / 1000))
+
+# re-setting general statistics for counts abundance
+adata.obs.n_genes_by_counts = np.count_nonzero(adata.X.toarray(), axis=1)
+adata.obs.total_counts = adata.X.toarray().sum(axis=1)
+
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    sc.pp.highly_variable_genes(adata, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
+
+print(f'after filtering shape is {adata.X.shape}')
+
+
+# %%
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
+    sc.pl.violin(adata, ['n_genes_by_counts', 'total_counts', 'pct_counts_mt'],
+                 jitter=0.4, multi_panel=True, groupby='timesimple')
+
+# %%
+column_of_interest = 'timesimple'
+
+stats_df = adata.obs.loc[:, [column_of_interest, 'n_genes_by_counts', 'total_counts']].groupby(
+    [column_of_interest]).median()
+
+stats_df = pd.concat([adata.obs.groupby([column_of_interest]).count().iloc[:, 0],
+                      stats_df], axis=1)
+stats_df.columns = ['# cells', 'median # genes', 'median # counts']
+
+stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, ylim=((1e2, 2e6)))
+plt.show()
+del column_of_interest, stats_df
+
+<<<<<<< HEAD
+#     tmp.varm['usage_coefs'] = pd.DataFrame(
+#         usage_coefs.T, index=tmp.var.index,
+#         prog_names=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
+=======
+# %%
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+>>>>>>> 71cf832 (wip marjanovic analysis)
+    
+    sc.external.pl.phate(adata, color=['clusterK12', 'timesimple'])
+
+# %%
+pd.crosstab(adata.obs.timesimple, adata.obs.clusterK12)
+
+# %%
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    _utils.joint_hvg_across_stages(adata, obs_category_key='timesimple', n_top_genes=5000)
+adata.var
+
+
+# %%
+prepared_adata_path = results_dir.joinpath('full.h5ad')
+
+if not prepared_adata_path.exists():
+    # Removing h5ad trouble saving element before saving
+    adata.uns.pop('clusterK12_colors_dict', None)
+    adata.write_h5ad(prepared_adata_path)
+else:
+    print('reading adata...')
+    adata = sc.read_h5ad(prepared_adata_path)
+    # restoring h5ad trouble saving element
+    adata.uns['clusterK12_colors_dict'] = dict(zip(adata.obs['clusterK12'].cat.categories, adata.uns['clusterK12_colors']))
+
+adata
+
+# %% [markdown]
+# ### Splitting the adata by "timesimple"
+
+# %%
+short_names_dict = {
+    '01_T_early_ND': 'T0',
+    '02_KorKP_early_ND': 'K2',
+    '04_K_12w_ND': 'K12',
+    '05_K_30w_ND': 'K30',
+    '06_KP_12w_ND': 'KP12',
+    '07_KP_20w_ND': 'KP20',
+    '08_KP_30w_ND': 'KP30'}
 
 # %%
 # %%time
 
-times = adata.obs.timesimple.cat.categories
-split_adatas_dir = _utils.set_dir(results_dir.joinpath('marjanovic_mmLungPlate_split'))
+column_of_interest = 'timesimple'
+categories = adata.obs[column_of_interest].cat.categories
 
-for time in times:
-    if not split_adatas_dir.joinpath(f'{time}.h5ad').exists():
-        tmp = adata[adata.obs.timesimple == time].copy()
+split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
 
-        tmp.uns['name'] = f'{time}'   # full name
-        tmp.uns['sname'] = f't{time[:2]}'  # short name
+for cat in categories:
+    if not split_adatas_dir.joinpath(f'{cat}.h5ad').exists():
+        print(f'working on {cat}')
+        tmp = adata[adata.obs[column_of_interest] == cat].copy()
+
+        tmp.uns['name'] = f'{cat}'   # full name
+        tmp.uns['sname'] = short_names_dict[cat]  # short name
 
         # correcting the gene counts
         sc.pp.filter_genes(tmp, min_cells=0)
         sc.pp.filter_genes(tmp, min_counts=0)
+        
+        
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=5000)
 
-        # calculating per sample HVGs
-        sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=_constants.NUMBER_HVG)
-
-        tmp.write_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
+        # Removing h5ad trouble saving element before saving
+        tmp.uns.pop('clusterK12_colors_dict', None)
+        tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
 
         del tmp
+    else:
+        print(f'{cat} split adata exists')
 
 
 # %% [markdown]
 # ### Running multiple NMF iterations
 
 # %%
-# %%time
-
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
 
-ks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 
-for time in times:
-    print(f'Starting on {time}')
-    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
+# %%
+# %%time
+
+ks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+for cat in categories:
+    print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
+    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
     
-    c_object = cnmf.cNMF(cnmf_dir, time)
+    c_object = cnmf.cNMF(cnmf_dir, cat)
     
     # Variance normalized version of the data
-    X = sc.pp.scale(tmp.X[:, tmp.var.highly_variable].toarray(), zero_center=False)
+    X = _utils.subset_and_normalize_for_nmf(tmp, method='variance_cap')
     
-    c_object.prepare(X, ks, n_iter=200, new_nmf_kwargs={'tol': _constants.NMF_TOLERANCE})
+    c_object.prepare(X, ks, n_iter=120, new_nmf_kwargs={
+        'tol': _constants.NMF_TOLERANCE, 'beta_loss': 'kullback-leibler', 'max_iter': 1000})
     
     c_object.factorize(0, 1, gpu=True)
     
@@ -204,309 +344,235 @@ for time in times:
 
 
 # %%
-for time in times:
-    print(f'Starting on {time}')
-    c_object = cnmf.cNMF(cnmf_dir, time)
-    for thresh in [0.5, 0.4, 0.3]:
-        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500,
-                                  close_fig=True, show_clustering=True)
+# %%time
+for cat in categories:
+    print(f'Starting on {cat}, time is {time.strftime("%H:%M:%S", time.localtime())}')
+    c_object = cnmf.cNMF(cnmf_dir, cat)
+    for thresh in [0.5, 0.4]:
+        print(f'working on threshold {thresh}')
+        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=1000, 
+                                  consensus_method='mean',
+                                  close_fig=True, show_clustering=True, gpu=True)
+        # printing the selected knee point
+        df = cnmf.load_df_from_npz(c_object.paths['k_selection_stats_dt'] % c_object.convert_dt_to_str(thresh))
+        pos = len(df) - 4
+        for i in range(5):
+            print(cnmf.find_knee_point(df.prediction_error[:pos + i], df.k_source[:pos + i]), end=", ")
+        print()
 
 
 # %% [markdown]
-# ### Selecting the decomposition rank utilizing K-selection plots and PCA variance explained
+# ## 5. Selecting decomposition ranks for cNMF using knee-point and silhouette
+#
 
 # %%
-n_components = 14
+selected_cnmf_params = {
+    '01_T_early_ND': (2, 0.5),
+    '02_KorKP_early_ND': (4, 0.5),
+    '04_K_12w_ND': (4, 0.5),
+    '05_K_30w_ND': (4, 0.5),
+    '06_KP_12w_ND': (5, 0.5),
+    '07_KP_20w_ND': (5, 0.5),
+    '08_KP_30w_ND': (5, 0.5)}
 
-for time in times:
+selected_cnmf_params
+
+# %%
+# %%time
+
+split_adatas = {}
+decompositions = {}
+
+for cat, (k, threshold) in selected_cnmf_params.items():
+    print(f'Working on {cat} with k={k} and threshold={threshold}')
+    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
     
-    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
+    c_object = cnmf.cNMF(cnmf_dir, cat)
+    c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                       consensus_method='mean',
+                       nmf_refitting_iters=1000, show_clustering=False)
+
+    usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
     
-    # a, b, c, d, = sc.tl.pca(tmp.X[:, tmp.var.highly_variable], n_comps=n_components, return_info=True)
-    print(f'{time} - cummulative variance percentages:'),
-    for i in range(n_components):
-        print(f'{c[i]*100: .2f}', end='\t')
-    print()
-    for i in range(n_components):
-        print(f'{c.cumsum()[i]*100: .2f}', end='\t')
+    tmp.uns['cnmf_params'] = {'k_nmf': k, 'threshold': threshold}
+
+    # X ~ W @ H, transpose for cells to be columns
+    loss_per_cell = pfnmf.calc_beta_divergence(
+        c_object.X.T, W = spectra.T, H = usages.T, per_column=True)
+
+    res = comparator.NMFResult(
+        name=f'{tmp.uns["sname"]}_k{k}',
+        loss_per_cell=loss_per_cell,
+        rank=k,
+        W=usages,
+        H=spectra)
+    
+    comparator.NMFResultBase.calculate_gene_coefficients_list(
+        tmp, [res], target_sum=1_000_000, target_variance=tmp.var['variances_norm'].values)
+    
+    decompositions[cat] = {k: res}
+
+    tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
+
+    
+    # restoring h5ad trouble saving element
+    tmp.uns['clusterK12_colors_dict'] = dict(zip(tmp.obs['clusterK12'].cat.categories, tmp.uns['clusterK12_colors']))
+
+    split_adatas[cat] = tmp
     print()
 
 # %%
-# # %%time
+np.savez(results_dir.joinpath('decompositions.npz'), obj=decompositions)
 
-# selected_cnmf_params = {
-#     '01_T_early_ND': (2, 0.5),  # rank 3 has slightly better loss, but is much more unstable
-#     '02_KorKP_early_ND': (5, 0.5),  # could have chosen 4 as well
-#     '04_K_12w_ND': (6, 0.4),    # Program 6 isn't very stable, need to be careful with it
-#     '05_K_30w_ND': (8, 0.4),    # rank 8,0.3 better loss, but was less stable, 5 had similar loss with same stability
-#     '06_KP_12w_ND': (7, 0.4),   # there are four programs that seem very stable among the 4+ ranks
-#     '07_KP_20w_ND': (10, 0.5),  # Ranks 8, 9 also look very good
-#     '08_KP_30w_ND': (8, 0.5)}   # Ranks 11+ had better loss but were less stable, and their last programs where garbage
-
-# split_adatas = {}
-
-# for time, (k, threshold) in selected_cnmf_params.items():
-#     print(f'Working on {time} with k={k} and threshold={threshold}')
-#     tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}.h5ad'))
-
-#     c_object = cnmf.cNMF(cnmf_dir, time)
-#     c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
-#                        nmf_refitting_iters=1000, show_clustering=False)
-
-#     usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
-
-#     tmp.uns['cnmf_params'] = {'k_nmf': k, 'threshold': threshold}
-
-#     tmp.obsm['usages'] = usages.copy()
-
-#     usages_norm = usages / np.sum(usages, axis=1, keepdims=True)
-#     tmp.obsm['usages_norm'] = usages_norm
-
-#     # get per gene z-score of data after TPM normalization and log1p transformation 
-#     tpm_log1p_zscore = tmp.X.toarray()
-#     tpm_log1p_zscore /= 1e-6 * np.sum(tpm_log1p_zscore, axis=1, keepdims=True)
-#     tpm_log1p_zscore = np.log1p(tpm_log1p_zscore)
-#     tpm_log1p_zscore = sc.pp.scale(tpm_log1p_zscore)
-
-#     usage_coefs = _utils.fastols(usages_norm, tpm_log1p_zscore)
-
-#     tmp.varm['usage_coefs'] = pd.DataFrame(
-#         usage_coefs.T, index=tmp.var.index,
-#         prog_names=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
-    
-#     split_adatas[time] = tmp
-
-#     tmp.write_h5ad(split_adatas_dir.joinpath(f'{time}_GEPs.h5ad'))
-
+# %% [markdown]
+# #### Reloading the results
 
 # %% Loading GEPs adatas
 # %%time
-times = adata.obs.timesimple.cat.categories
-split_adatas_dir = _utils.set_dir(results_dir.joinpath('marjanovic_mmLungPlate_split'))
+
+column_of_interest = 'timesimple'
+categories = adata.obs[column_of_interest].cat.categories
+
+split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
 
 split_adatas = {}
-for time in times:
-    split_adatas[time] = sc.read_h5ad(split_adatas_dir.joinpath(f'{time}_GEPs.h5ad'))
+for cat in categories:
+    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
+    # restoring h5ad trouble saving element
+    tmp.uns['clusterK12_colors_dict'] = dict(zip(tmp.obs['clusterK12'].cat.categories, tmp.uns['clusterK12_colors']))
+
+    split_adatas[cat] = tmp
+
+decompositions = np.load(results_dir.joinpath('decompositions.npz'), allow_pickle=True)['obj'].item()
 
 # %% [markdown]
 # ### Examening results
 
 # %%
-for time in times:
-    print(time)
-    s = split_adatas[time].obsm['usages_norm'].sum(axis=0)
+for cat in categories:
+    print(cat)
+    res = decompositions[cat][split_adatas[cat].uns['cnmf_params']['k_nmf']]
     with np.printoptions(precision=2, suppress=False):
-        print(s * 100 / s.sum())
+        print(res.prog_percentages)
 
 # %%
-# Plotting normalized usages clustermap
-for time in times:
-    tmp = split_adatas[time]
-    sname = tmp.uns["sname"]
-    k = tmp.obsm["usages"].shape[1]
 
-    un_sns = _utils.plot_usages_norm_clustermaps(tmp, show=True)
-    un_sns.savefig(results_dir.joinpath(
-        sname, f'{sname}.usages_norm.k_{k}.png'),
-        dpi=180, bbox_inches='tight')
-    plt.close(un_sns.fig)
+# %%
+color_obs_by = 'clusterK12'
+decomposition_images = _utils.set_dir(split_adatas_dir.joinpath("images"))
 
-    _utils.plot_usages_norm_violin(
-        tmp, 'clusterK12', save_path=results_dir.joinpath(
-            sname, f'{sname}_norm_usage_per_lineage_k_{k}.png'))
+with warnings.catch_warnings():  # supress scanpy plotting warning
+    warnings.simplefilter(action='ignore', category=UserWarning)
+    warnings.simplefilter(action='ignore', category=FutureWarning)
 
+    for cat in categories:
+        tmp = split_adatas[cat]
+        k = tmp.uns['cnmf_params']['k_nmf']
+        res = decompositions[cat][k]
+        
+        # Phate
+        um = sc.external.pl.phate(tmp, color=color_obs_by, s=10, return_fig=True, title=f'{cat}')
+        plt.tight_layout()
+        um.savefig(decomposition_images.joinpath(f"{cat}_phate_{color_obs_by}.png"), dpi=300)
+        plt.close(um)
 
+        # usages clustermap
+        un_sns = _utils.plot_usages_norm_clustermaps(
+            tmp, normalized_usages=res.norm_usages, columns=res.prog_names,
+            title=f'{cat}', show=False, sns_clustermap_params={
+                'row_colors': tmp.obs[color_obs_by].map(tmp.uns[f'{color_obs_by}_colors_dict'])})
+        un_sns.savefig(decomposition_images.joinpath(f"{cat}_usages_norm.png"),
+                       dpi=180, bbox_inches='tight')
+        plt.close(un_sns.fig)
 
+        # usages violin plot
+        _utils.plot_usages_norm_violin(
+            tmp, color_obs_by, save_path=decomposition_images.joinpath(
+                f'{cat}_norm_usage_per_lineage.png'))
 
 # %% [markdown]
-# ## ToDo - plot all programs on phate
-# ## ToDo - consider adding "main program" per cell and plot it on joint tsne and phate
+# ## 6. Running comparator on the data
+#
 
 # %%
-for time in times:
-    tmp = split_adatas[time]
-    plt.scatter(tmp.obsm['X_phate'][:, 0], tmp.obsm['X_phate'][:, 1], c=tmp.obsm['usages_norm'][:, 0])
-    plt.title(f'{tmp.uns["name"]} Program 0 on Phate coordinates')
-    plt.show()
-    plt.close()
+for cat in categories:
+    tmp = split_adatas[cat]
+
+    field_1 = color_obs_by
+
+    tmp.obsm['row_colors'] = pd.concat([
+        tmp.obs[field_1].map(tmp.uns[f'{field_1}_colors_dict']),
+        ], axis=1)
 
 # %%
+# %%time
 
-# sub-setting the genes:
-mutual_hvg = list(set().union(*[tmp.var[tmp.var.highly_variable].index \
-                          for time, tmp in split_adatas.items()]))
-mutual_hvg = list(set(mutual_hvg).intersection(*[tmp.var[tmp.var.highly_variable].index \
-                          for time, tmp in split_adatas.items()]))
-# mutual_hvg = adata.var[adata.var.highly_variable].index
+pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[4,5]]]
 
-concatenated_spectras = pd.concat([
-    tmp.varm['usage_coefs'].loc[mutual_hvg].copy() for time, tmp in split_adatas.items()], axis=1)
+for cat_a, cat_b in pairs:
+    print(f'comparing {cat_a} and {cat_b}')
+    comparison_dir = _utils.set_dir(results_dir.joinpath(f"comparator_{cat_a:.2s}_{cat_b:.2s}"))
+    
+    adata_a = split_adatas[cat_a]
+    adata_b = split_adatas[cat_b]
+    
+    if os.path.exists(comparison_dir.joinpath('comparator.npz')):
+        continue
+    #     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    # else:
+    cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir,
+                                'torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
+                               highly_variable_genes='joint_highly_variable',
+                               tpm_target_sum=1_000_000)
 
-n_genes, n_programs = concatenated_spectras.shape
+    print('decomposing')
+    cmp.extract_geps_on_jointly_hvgs()
+    
+    # getting cnmf results
+    c_object = cnmf.cNMF(cnmf_dir, cat_b)
+    usages_matrices_b = []
+    
+    threshold = adata_b.uns['cnmf_params']['threshold']
+    for k in range(cmp.rank_a, cmp.rank_a + cmp.max_added_rank + 1):
+        try:
+            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+        except FileNotFoundError:
+            print(f'Calculating consensus NMF for k={k} and threshold={threshold}')
+            c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                               consensus_method='mean',
+                               nmf_refitting_iters=1000, show_clustering=False)
 
-pearson_corr = np.corrcoef(concatenated_spectras.T)
+            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+        
+        usages_matrices_b.append(usages)
+    
+    cmp.decompose_b(repeats = 5, precalculated_denovo_usage_matrices=usages_matrices_b)
+    
+    cmp.print_errors()
+    
+    cmp.examine_adata_a_decomposition_on_jointly_hvgs(35, 3500)
+    cmp.examine_adata_b_decompositions(3500, 35, 3500)
+    
+    cmp.plot_decomposition_comparisons()
+    
+    cmp.calculate_fingerprints()
+    
+    print('running GSEA')
+    cmp.run_gsea(gene_ids_column_number=1, 
+                 gprofiler_kwargs=dict(organism='mmusculus',
+                                       sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
 
-# cosine figure
-fig, ax = plt.subplots(figsize=(4 + n_programs * 0.43, 4 + n_programs * 0.41))
-
-_utils.heatmap_with_numbers(
-    pearson_corr, ax=ax, param_dict={'vmin': 0, 'vmax': 1})
-
-ax.xaxis.tick_bottom()
-ax.set_xticklabels(concatenated_spectras.columns, rotation='vertical')
-ax.set_yticklabels(concatenated_spectras.columns)
-ax.set_title('Pearson correlation',
-             size=25, y=1.05, x=0.43)
-
-fig.savefig(results_dir.joinpath('correlation_pearson.png'),
-            dpi=180, bbox_inches='tight')
-plt.close(fig)
+    marker_genes = ['Krt8', 'Hopx', 'Klf6', 'Aqp5', 'Sftpa1', 'Sftpb', 'Sftpc',
+                'Mki67', 'Top2a', 'Rrm1', 'Rrm2',
+                'Sox2', 'Scgb3a2', 'Foxj1', 'Dynlrb2', 'Hoxa5', 'Col5a2', ]
+    
+    cmp.plot_marker_genes_heatmaps(marker_genes)
+    
+    cmp.plot_usages_violin('celltype', show=False)
+    
+    cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
 
 
-# correlation histogram
-fig, ax = plt.subplots(figsize=(6, 5))
-
-plt.hist(pearson_corr[np.triu_indices_from(pearson_corr, k=1)],
-         bins=np.linspace(-1, 1, 41))
-ax.set_title('Pearson correlation distribution')
-plt.show()
-
-fig.savefig(results_dir.joinpath('correlation_histogtam_pearson.png'),
-            dpi=180, bbox_inches='tight')
-
-plt.close(fig)
-
-# 3.1b Calculating spearman correlation between usages coefficient
-
-from scipy.stats import rankdata
-N_COMPARED_RANKED = 1000
-
-ranked_coefs = n_genes - rankdata(concatenated_spectras, axis=0)
-
-ranked_coefs[ranked_coefs > N_COMPARED_RANKED] = N_COMPARED_RANKED
-
-spearman_corr = np.corrcoef(ranked_coefs, rowvar=False)
-
-# spearman figure
-fig, ax = plt.subplots(figsize=(4 + ranked_coefs.shape[1] * 0.43,
-                                4 + ranked_coefs.shape[1] * 0.41))
-
-_utils.heatmap_with_numbers(
-    spearman_corr, ax=ax, param_dict={'vmin': 0, 'vmax': 1})
-
-ax.xaxis.tick_bottom()
-ax.set_xticklabels(concatenated_spectras.columns, rotation='vertical')
-ax.set_yticklabels(concatenated_spectras.columns)
-ax.set_title(f'{N_COMPARED_RANKED}-Truncated Spearman Correlation',
-             size=25, y=1.05, x=0.43)
-
-fig.savefig(results_dir.joinpath(
-    f'correlation_spearman_{N_COMPARED_RANKED}_truncated.png'),
-    dpi=180, bbox_inches='tight')
-
-plt.close(fig)
-
-# correlation histogram
-fig, ax = plt.subplots(figsize=(6, 5))
-
-plt.hist(spearman_corr[np.triu_indices_from(spearman_corr, k=1)],
-         bins=np.linspace(0, 1, 21))
-ax.set_title('Spearman Correlation distribution')
-plt.show()
-
-fig.savefig(results_dir.joinpath(
-    f'correlation_histogtam_spearman_{N_COMPARED_RANKED}_truncated.png'),
-    dpi=180, bbox_inches='tight')
-
-plt.close(fig)
 
 # %%
-
-import matplotlib as mpl
-import networkx as nx
-from scipy.cluster import hierarchy
-
-threshold = 0.2
-
-# maping adata short name to layer number
-name_map = {}
-for i, time in enumerate(times):
-    name_map['t'+time[:2]] = i + 1
-
-ks = [tmp.obsm['usages_norm'].shape[1] for time, tmp in split_adatas.items()]
-
-# adjacency matrix creation and filtering
-
-adj_df = pd.DataFrame(np.round((spearman_corr + pearson_corr) / 2, 2),
-                      index=concatenated_spectras.columns,
-                      columns=concatenated_spectras.columns)
-
-# order
-linkage = hierarchy.linkage(
-    adj_df, method='average', metric='euclidean')
-prog_order = hierarchy.leaves_list(
-    hierarchy.optimal_leaf_ordering(linkage, adj_df))
-
-np.fill_diagonal(adj_df.values, 0)
-# adj_df.values[adj_df.values <= 0.0] = 0
-
-# keeping only edges between consecutive layers
-for i in range(len(ks) - 2):
-    adj_df.values[:np.sum(ks[:i + 1]), np.sum(ks[:i + 2]):] = 0
-    adj_df.values[np.sum(ks[:i + 2]):, :np.sum(ks[:i + 1])] = 0
-
-adj_df.values[adj_df.values <= threshold] = 0
-print(f'Number of edges={np.count_nonzero(adj_df)}')
-
-# ordering the nodes for display
-adj_df = adj_df.iloc[prog_order, prog_order]
-
-# create the graph object
-G = nx.from_numpy_array(adj_df.values, create_using=nx.Graph)
-nx.relabel_nodes(G, lambda i: adj_df.index[i], copy=False)
-nx.set_node_attributes(
-    G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
-
-# prepare graph for display
-layout = nx.multipartite_layout(G, subset_key='layer')
-
-edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
-edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
-
-for layer in {data['layer'] for key, data in G.nodes.data()}:
-    nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
-
-    angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
-
-    for i, node in enumerate(nodes):
-        layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
-
-fig, ax = plt.subplots(1, 1, figsize=(16.4, 19.2), dpi=180)
-nx.draw(G, layout, node_size=1500, with_labels=False, edge_color=weights,
-        edge_vmin=threshold, edge_vmax=1., width=edge_width, ax=ax)
-
-cmp = mpl.cm.ScalarMappable(mpl.colors.Normalize(vmin=threshold, vmax=1))
-plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(15, 5, 71))
-
-# change color of layers
-for time, tmp in split_adatas.items():
-    nx.draw_networkx_nodes(
-        G, layout, node_color=adata.uns['timesimple_colors_dict'][time],
-        node_size=1400, nodelist=[f'{tmp.uns["sname"]}.p{i}' for i in range(
-            tmp.obsm['usages'].shape[1])], ax=ax)
-nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
-
-ax.set_title(f'Timepoint correlation graph, correlation threshold={threshold}',
-             {'fontsize': 25})
-plt.show()
-
-
-fig.savefig(results_dir.joinpath(
-    f'correlations_graph_threshold_{threshold}.png'),
-    dpi=180, bbox_inches='tight')
-
-plt.close()
-
-del name_map, G, edges, weights, i, layer, angles, node, nodes
-del fig, ax, layout, prog_order
-
+tmp.var
