@@ -173,7 +173,7 @@ class NMFResultBase(object):
             A tuple containing the aggregated results:
             - joint_ranks: List of ranks from each NMFResult object.
             - joint_names: List of program names from all NMFResult objects.
-            - joint_usages: Concatenated array of norm_usages from all NMFResult objects.
+            - joint_usages: Concatenated array of normalized_usages from all NMFResult objects.
             - joint_labels: List of program labels from all NMFResult objects.
         """
         joint_ranks = [r.rank for r in results]
@@ -1374,7 +1374,7 @@ class Comparator(object):
         title = (f"{self.a_sname} {group_by_string} violin plot of original GEPs"
                  f", k={res.rank}")
         _utils.plot_usages_norm_violin(
-            self.adata_a, group_by_key=group_by_key, norm_usages=res.norm_usages,
+            self.adata_a, group_by_key=group_by_key, normalized_usages=res.norm_usages,
             prog_names=res.prog_names, title=title, show=show,
             save_path=dec_folder.joinpath(
                 f'{res.name}_normalized_usages_violin_plots.png'))
@@ -1383,7 +1383,7 @@ class Comparator(object):
             title = self._get_title(res) % f'{group_by_string} violin plot'
             _utils.plot_usages_norm_violin(
                 self.adata_b, group_by_key=group_by_key,
-                norm_usages=res.norm_usages,
+                normalized_usages=res.norm_usages,
                 prog_names=res.prog_names,
                 title=title,
                 save_path=dec_folder.joinpath(

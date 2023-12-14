@@ -500,9 +500,9 @@ def _create_usages_norm_adata(adata, norm_usages: np.ndarray = None, prog_names:
         prog_names = adata.varm['usage_coefs'].columns
     var = pd.DataFrame(index=prog_names)
 
-    # make sure the length of prog_names is similar to the number of prog_names in norm_usages
+    # make sure the length of prog_names is similar to the number of prog_names in normalized_usages
     assert len(prog_names) == norm_usages.shape[1], \
-        "The number of programs names is not equal to the number of prog_names in norm_usages"
+        "The number of programs names is not equal to the number of prog_names in normalized_usages"
 
     with warnings.catch_warnings():  # supress 64 -> 32 float warning
         warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -548,7 +548,7 @@ def expand_adata_row_colors(adata: sc.AnnData, new_color_column):
 def plot_usages_norm_violin(
         adata: sc.AnnData,
         group_by_key: str,  # obs key
-        norm_usages: np.ndarray = None,
+        normalized_usages: np.ndarray = None,
         prog_names: list = None,
         title: str = None,
         save_path: typing.Union[PathLike, None] = None,
@@ -558,7 +558,7 @@ def plot_usages_norm_violin(
     if title is None:
         title = f'{adata.uns["name"]} program usage per {group_by_key}'
 
-    u_data = _create_usages_norm_adata(adata, norm_usages, prog_names)
+    u_data = _create_usages_norm_adata(adata, normalized_usages, prog_names)
     u_data.obs[group_by_key] = pd.Categorical(
         u_data.obs[group_by_key]).remove_unused_categories()
 
