@@ -81,9 +81,9 @@ def calc_beta_divergence(X, w_1=None, w_2=None, h_1=None, h_2=None,
         If per_column is True, returns an array of the beta divergence errors between each column
         of X and the corresponding column of W*H.
     """
-    if W is not None:
+    if W is None:
         W = np.concatenate([w_1, w_2], axis=1)
-    if H is not None:
+    if H is None:
         H = np.concatenate([h_1, h_2], axis=0)
 
     if not per_column:
