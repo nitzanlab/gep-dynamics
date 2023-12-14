@@ -204,6 +204,26 @@ class NMFResultBase(object):
             index=gene_index,
             columns=self.prog_names)
 
+    @staticmethod
+    def calculate_gene_coefficients_list(
+            adata: sc.AnnData, results_list: List['NMFResultBase'], target_sum=100_000,
+            target_variance: typing.Union[float, np.ndarray, pd.Series] = 1.):
+        """
+        Calculate gene coefficients for all the newly decomposed GEPs
+        """
+        max_value = 20
+
+        z_scores = sc.pp.normalize_total(adata, target_sum=target_sum, inplace=False)['X']
+        z_scores = sc.pp.log1p(z_scores)
+        z_scores = sc.pp.scale(z_scores, max_value=max_value)
+        if isinstance(target_variance, numbers.Number):
+            z_scores *= np.sqrt(target_variance)
+        else:
+            z_scores *= np.sqrt(target_variance)
+
+        for res in results_list:
+            res.calculate_gene_coefs(z_scores, adata.var_names)
+
     def get_top_genes(self, n: int = 100) -> pd.DataFrame:
         """
         Return a dataframe with the top genes coefficients for each program.
@@ -920,13 +940,13 @@ class Comparator(object):
 
         # calculate gene coefs for each GEP
         if self.coefs_variance_normalization is None:
-            self._calculate_gene_coefficients(
+            NMFResultBase.calculate_gene_coefficients_list(
                 self.adata_a, [self.a_result], self.tpm_target_sum)
         elif self.coefs_variance_normalization == 'variances_norm':
             var_norm = sc.pp.highly_variable_genes(
                 self.adata_a, flavor='seurat_v3', n_top_genes=5000,
                 inplace=False)['variances_norm'].values
-            self._calculate_gene_coefficients(
+            NMFResultBase.calculate_gene_coefficients_list(
                 self.adata_a, [self.a_result], self.tpm_target_sum,
                 target_variance=var_norm)
 
@@ -1069,13 +1089,13 @@ class Comparator(object):
 
         # calculate gene coefs for each GEP
         if self.coefs_variance_normalization is None:
-            self._calculate_gene_coefficients(
+            NMFResultBase.calculate_gene_coefficients_list(
                 self.adata_b, self._all_results, self.tpm_target_sum)
         elif self.coefs_variance_normalization == 'variances_norm':
             var_norm = sc.pp.highly_variable_genes(
                 self.adata_b, flavor='seurat_v3', n_top_genes=5000,
                 inplace=False)['variances_norm'].values
-            self._calculate_gene_coefficients(
+            NMFResultBase.calculate_gene_coefficients_list(
                 self.adata_b, self._all_results, self.tpm_target_sum,
                 target_variance=var_norm)
 
@@ -1724,27 +1744,6 @@ class Comparator(object):
 
             output.append(df)
         return output
-
-    @staticmethod
-    def _calculate_gene_coefficients(adata: sc.AnnData,
-                                     results_list: List[NMFResultBase],
-                                     target_sum=100_000,
-                                     target_variance: typing.Union[float, np.ndarray, pd.Series] = 1.):
-        """
-        Calculate gene coefficients for all the newly decomposed GEPs
-        """
-        max_value = 20
-
-        z_scores = sc.pp.normalize_total(adata, target_sum=target_sum, inplace=False)['X']
-        z_scores = sc.pp.log1p(z_scores)
-        z_scores = sc.pp.scale(z_scores, max_value=max_value)
-        if isinstance(target_variance, numbers.Number):
-            z_scores *= np.sqrt(target_variance)
-        else:
-            z_scores *= np.sqrt(target_variance)
-
-        for res in results_list:
-            res.calculate_gene_coefs(z_scores, adata.var_names)
 
     @staticmethod
     def _run_nmf(x, nmf_kwargs, name, tens: 'torch.Tensor' = None, verbose: int = 0) -> NMFResult:

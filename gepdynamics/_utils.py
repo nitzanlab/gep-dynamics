@@ -68,7 +68,6 @@ def project_simplex_points(points: np.ndarray) -> np.ndarray:
     return (points - center) @ rotation_matrix.T
 
 
-
 def truncated_spearmans_correlation(data, truncation_level: int = 1000,
                                     smaller_is_better: bool = False, rowvar: bool = True):
     """

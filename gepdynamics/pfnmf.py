@@ -44,9 +44,10 @@ from sklearn.utils import check_random_state
 PRINT_EVERY = 10
 
 
-def calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss=1, square_root=False, per_column=False) -> Union[float, np.ndarray]:
-    '''
-    Calculate the beta divergence error between the original matrix X and the product of 
+def calc_beta_divergence(X, w_1=None, w_2=None, h_1=None, h_2=None,
+                         W=None, H=None, beta_loss=1, square_root=False, per_column=False) -> Union[float, np.ndarray]:
+    """
+    Calculate the beta divergence error between the original matrix X and the product of
     the two non-negative matrices W and H, using the given beta loss parameter.
 
     Parameters:
@@ -54,9 +55,13 @@ def calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss=1, square_root=False, 
     X : array-like
         The original matrix to be factorized.
     w_1, w_2 : array-like
-        The factor matrices to be multiplied to form W.
+        The factor matrices jointly forming W.
     h_1, h_2 : array-like
-        The factor matrices to be multiplied to form H.
+        The factor matrices jointly forming H.
+    W : array-like
+        The factor matrix W.
+    H : array-like
+        The factor matrix H.
     beta_loss : float or {'frobenius', 'kullback-leibler', 'itakura-saito'}
         Parameter of the beta-divergence.
         If beta == 2, this is half the Frobenius *squared* norm.
@@ -75,16 +80,16 @@ def calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss=1, square_root=False, 
         If per_column is False, returns the overall beta divergence error between X and W*H.
         If per_column is True, returns an array of the beta divergence errors between each column
         of X and the corresponding column of W*H.
-    '''
+    """
+    if W is not None:
+        W = np.concatenate([w_1, w_2], axis=1)
+    if H is not None:
+        H = np.concatenate([h_1, h_2], axis=0)
 
     if not per_column:
-        return sknmf._beta_divergence(X, np.concatenate([w_1, w_2], axis=1),
-                                      np.concatenate([h_1, h_2], axis=0),
-                                      beta=beta_loss, square_root=square_root)
+        return sknmf._beta_divergence(X, W, H, beta=beta_loss, square_root=square_root)
     else:
         result = np.full((X.shape[1]), np.inf)
-        W = np.concatenate([w_1, w_2], axis=1)
-        H = np.concatenate([h_1, h_2], axis=0)
 
         for col in range(X.shape[1]):
             result[col] = sknmf._beta_divergence(
