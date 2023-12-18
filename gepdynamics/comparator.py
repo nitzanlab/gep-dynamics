@@ -26,13 +26,11 @@ output:
 """
 import os
 import numbers
-import resource
 import typing
 
 from copy import copy
 from typing import Tuple, Dict, Any, List, Union
 
-import networkx as nx
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -41,11 +39,10 @@ import seaborn as sns
 
 from openpyxl import load_workbook
 from sklearn.decomposition import _nmf as sknmf
-from scipy.cluster import hierarchy
 
 import gepdynamics._utils as _utils
 import gepdynamics.cnmf as cnmf
-from gepdynamics import pfnmf
+from gepdynamics import pfnmf, plotting
 from gepdynamics._constants import NMFEngine, Stage, NUMBER_HVG, NMF_TOLERANCE, EXCEL_FINGERPRINT_TEMPLATE
 
 
@@ -1481,7 +1478,7 @@ class Comparator(object):
         # usages flow graph
         usages_title = f'Correlations flow chart of usages'
         usages_filename = f'flow_chart_usages_{"_".join(names_list)}.png'
-        usages_adjacency = self._get_ordered_adjacency_matrix(
+        usages_adjacency = plotting.get_ordered_adjacency_matrix(
             np.corrcoef(joint_usages.T), joint_names, ks, usage_corr_threshold, verbose = self.verbosity)
 
         # genes flow graph
@@ -1492,12 +1489,12 @@ class Comparator(object):
             [res.gene_coefs for res in results], axis = 1),
             truncation_level = tsc_truncation_level, rowvar = False)
 
-        genes_adjacency = self._get_ordered_adjacency_matrix(
+        genes_adjacency = plotting.get_ordered_adjacency_matrix(
             tsc, joint_names, ks, tsc_threshold, verbose = self.verbosity)
 
         for adjacency, title, filename in [(usages_adjacency, usages_title, usages_filename),
                                            (genes_adjacency, genes_title, genes_filename)]:
-            fig = self._plot_layered_correlation_flow_chart(
+            fig = plotting.plot_layered_correlation_flow_chart(
                 names_list, adjacency, prog_names_dict, title)
 
             if save:
@@ -1763,96 +1760,4 @@ class Comparator(object):
             rank=W.shape[1],
             W=W,
             H=H)
-
-    @staticmethod
-    def _get_ordered_adjacency_matrix(correlation_matrix, prog_names, ranks, threshold=0.2, verbose: bool = False):
-        """
-        Given a correlation matrix to base the adjacency matrix on, returns the
-        adjacency matrix after filtering out edges with correlation below the threshold
-        and keeping only edges between consecutive layers.
-        """
-        # adjacency matrix creation
-        adjacency = pd.DataFrame(np.round((correlation_matrix), 2),
-                              index=prog_names, columns=prog_names)
-
-        # order
-        linkage = hierarchy.linkage(
-            adjacency, method='average', metric='euclidean')
-        prog_order = hierarchy.leaves_list(
-            hierarchy.optimal_leaf_ordering(linkage, adjacency))
-
-        # keeping only edges between consecutive layers
-        for i in range(len(ranks) - 2):
-            adjacency.values[:np.sum(ranks[:i + 1]), np.sum(ranks[:i + 2]):] = 0
-            adjacency.values[np.sum(ranks[:i + 2]):, :np.sum(ranks[:i + 1])] = 0
-
-        np.fill_diagonal(adjacency.values, 0)
-        adjacency.values[adjacency.values <= threshold] = 0
-
-        if verbose:
-            print(f'Number of edges={np.count_nonzero(adjacency)}')
-
-        # ordering the nodes for display
-        adjacency = adjacency.iloc[prog_order, prog_order]
-
-        return adjacency
-
-    @staticmethod
-    def _plot_layered_correlation_flow_chart(layer_keys, adjacency_df: pd.DataFrame,
-                                            prog_names_dict, title: str,
-                                            plt_figure_kwargs: Dict = None,
-                                            fig_title_kwargs: Dict = None):
-        """
-        Plotting the flow chart of the correlation matrix between layers.
-        """
-        # setting figure arguments
-        figure_kwargs = {'figsize': (14.4, 16.2), 'dpi': 100}
-        if plt_figure_kwargs is not None: figure_kwargs.update(plt_figure_kwargs)
-
-        title_kwargs = {'fontsize': 25, 'y': 0.95}
-        if fig_title_kwargs is not None: title_kwargs.update(fig_title_kwargs)
-
-        # mapping adata short name to layer number
-        name_map = dict(zip(layer_keys, range(len(layer_keys))))
-
-        # create the graph object
-        G = nx.from_numpy_array(adjacency_df.values, create_using=nx.Graph)
-        nx.relabel_nodes(G, lambda i: adjacency_df.index[i], copy=False)
-        nx.set_node_attributes(
-            G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
-
-        # prepare graph for display
-        layout = nx.multipartite_layout(G, subset_key='layer')
-
-        edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
-        edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
-
-        if len(layer_keys) > 2:
-            for layer in {data['layer'] for key, data in G.nodes.data()}:
-                nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
-
-                angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
-
-                for i, node in enumerate(nodes):
-                    layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
-
-        fig, ax = plt.subplots(1, 1, **figure_kwargs)
-        nx.draw(G, layout, node_size=3000, with_labels=False, edge_color=weights,
-                edge_vmin=0, edge_vmax=1., width=edge_width, ax=ax)
-
-        cmp = plt.matplotlib.cm.ScalarMappable(plt.matplotlib.colors.Normalize(vmin=0, vmax=1))
-        plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(18, 5, 86))
-
-        # change color of layers
-        for key in layer_keys:
-            nx.draw_networkx_nodes(
-                G, layout, node_size=2800, nodelist=prog_names_dict[key],
-                # node_color=coloring_scheme[key],
-                ax=ax)
-        nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
-
-        plt.suptitle(title, **title_kwargs)
-
-        plt.tight_layout()
-        return fig
 

@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from typing import List
+from typing import List, Dict, Iterable
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import rankdata
-
+import networkx as nx
 import plotly.graph_objects as go
 import plotly.io as pio
-pio.renderers.default = 'browser'
-# pio.renderers.default = 'svg'
+
+from scipy.stats import rankdata
+from scipy.cluster import hierarchy
 
 import gepdynamics._utils as _utils
 
-UNASSIGNED_COLUMN = 'unassigned'
+pio.renderers.default = 'browser'
+# pio.renderers.default = 'svg'
 
+UNASSIGNED_GENES_COLUMN = 'unassigned'
 
 def get_rank_from_coefs(orig_coefs, gene_indices, cutoff):
     """ create a dataframe of ranks up to cutoff from a dataframe of coefficients
@@ -25,7 +27,7 @@ def get_rank_from_coefs(orig_coefs, gene_indices, cutoff):
     coefs = orig_coefs.iloc[gene_indices].copy()
     tmp_none = 1 - (coefs==0).all(axis=1).astype(int) # if all prog_names are zero set to 0 else 1
     coefs.loc[:,:] = rankdata(-coefs, axis=0)
-    coefs[UNASSIGNED_COLUMN] = tmp_none * cutoff
+    coefs[UNASSIGNED_GENES_COLUMN] = tmp_none * cutoff
     coefs[coefs > cutoff] = cutoff + 1
     return coefs
 
@@ -99,9 +101,9 @@ def plot_sankey_for_lung_dev(adata_a, adata_b, adata_c,
                 target.append(j + a_coefs.shape[1])
                 value.append(val)
                 link_colors.append('lightgrey')
-                if col_a == UNASSIGNED_COLUMN:
+                if col_a == UNASSIGNED_GENES_COLUMN:
                     link_colors[-1] = 'lightblue'
-                elif col_b == UNASSIGNED_COLUMN:
+                elif col_b == UNASSIGNED_GENES_COLUMN:
                     link_colors[-1] = 'lightpink'
 
     # calculate b-c links
@@ -113,9 +115,9 @@ def plot_sankey_for_lung_dev(adata_a, adata_b, adata_c,
                 target.append(j + a_coefs.shape[1] + b_coefs.shape[1])
                 value.append(val)
                 link_colors.append('lightgrey')
-                if col_b == UNASSIGNED_COLUMN:
+                if col_b == UNASSIGNED_GENES_COLUMN:
                     link_colors[-1] = 'lightpink'
-                elif col_c == UNASSIGNED_COLUMN:
+                elif col_c == UNASSIGNED_GENES_COLUMN:
                     link_colors[-1] = 'lightgreen'
 
     fig = go.Figure(data=[go.Sankey(
@@ -163,3 +165,99 @@ def plot_marker_genes_heatmaps(programs_list: List[pd.Series],
     if show:
         plt.show()
     plt.close()
+
+
+def get_ordered_adjacency_matrix(correlation_matrix: np.ndarray,
+                                 prog_names: Iterable,
+                                 ranks: Iterable,
+                                 threshold=0.2,
+                                 verbose: bool = False) -> pd.DataFrame:
+    """
+    Given a correlation matrix to base the adjacency matrix on, returns the
+    adjacency matrix after filtering out edges with correlation below the threshold
+    and keeping only edges between consecutive layers.
+    """
+    # adjacency matrix creation
+    adjacency = pd.DataFrame(np.round((correlation_matrix), 2),
+                             index=prog_names, columns=prog_names)
+
+    # order
+    linkage = hierarchy.linkage(
+        adjacency, method='average', metric='euclidean')
+    prog_order = hierarchy.leaves_list(
+        hierarchy.optimal_leaf_ordering(linkage, adjacency))
+
+    # keeping only edges between consecutive layers
+    for i in range(len(ranks) - 2):
+        adjacency.values[:np.sum(ranks[:i + 1]), np.sum(ranks[:i + 2]):] = 0
+        adjacency.values[np.sum(ranks[:i + 2]):, :np.sum(ranks[:i + 1])] = 0
+
+    np.fill_diagonal(adjacency.values, 0)
+    adjacency.values[adjacency.values <= threshold] = 0
+
+    if verbose:
+        print(f'Number of edges={np.count_nonzero(adjacency)}')
+
+    # ordering the nodes for display
+    adjacency = adjacency.iloc[prog_order, prog_order]
+
+    return adjacency
+
+
+def plot_layered_correlation_flow_chart(layer_keys, adjacency_df: pd.DataFrame,
+                                         prog_names_dict, title: str,
+                                         plt_figure_kwargs: Dict = None,
+                                         fig_title_kwargs: Dict = None) -> plt.Figure:
+    """
+    Plotting the flow chart of the correlation matrix between layers.
+    """
+    # setting figure arguments
+    figure_kwargs = {'figsize': (14.4, 16.2), 'dpi': 100}
+    if plt_figure_kwargs is not None: figure_kwargs.update(plt_figure_kwargs)
+
+    title_kwargs = {'fontsize': 25, 'y': 0.95}
+    if fig_title_kwargs is not None: title_kwargs.update(fig_title_kwargs)
+
+    # mapping adata short name to layer number
+    name_map = dict(zip(layer_keys, range(len(layer_keys))))
+
+    # create the graph object
+    G = nx.from_numpy_array(adjacency_df.values, create_using=nx.Graph)
+    nx.relabel_nodes(G, lambda i: adjacency_df.index[i], copy=False)
+    nx.set_node_attributes(
+        G, {node: name_map[node.split('.')[0]] for node in G.nodes}, name='layer')
+
+    # prepare graph for display
+    layout = nx.multipartite_layout(G, subset_key='layer')
+
+    edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
+    edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
+
+    if len(layer_keys) > 2:
+        for layer in {data['layer'] for key, data in G.nodes.data()}:
+            nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
+
+            angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+
+            for i, node in enumerate(nodes):
+                layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
+
+    fig, ax = plt.subplots(1, 1, **figure_kwargs)
+    nx.draw(G, layout, node_size=3000, with_labels=False, edge_color=weights,
+            edge_vmin=0, edge_vmax=1., width=edge_width, ax=ax)
+
+    cmp = plt.matplotlib.cm.ScalarMappable(plt.matplotlib.colors.Normalize(vmin=0, vmax=1))
+    plt.colorbar(cmp, orientation='horizontal', cax=fig.add_subplot(18, 5, 86))
+
+    # change color of layers
+    for key in layer_keys:
+        nx.draw_networkx_nodes(
+            G, layout, node_size=2800, nodelist=prog_names_dict[key],
+            # node_color=coloring_scheme[key],
+            ax=ax)
+    nx.draw_networkx_labels(G, layout, font_size=11, ax=ax)
+
+    plt.suptitle(title, **title_kwargs)
+    plt.tight_layout()
+
+    return fig
