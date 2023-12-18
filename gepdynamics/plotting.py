@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from typing import List, Dict, Iterable
+from typing import List, Dict, Iterable, Literal
 
 import numpy as np
 import pandas as pd
@@ -204,10 +204,14 @@ def get_ordered_adjacency_matrix(correlation_matrix: np.ndarray,
     return adjacency
 
 
-def plot_layered_correlation_flow_chart(layer_keys, adjacency_df: pd.DataFrame,
-                                         prog_names_dict, title: str,
-                                         plt_figure_kwargs: Dict = None,
-                                         fig_title_kwargs: Dict = None) -> plt.Figure:
+def plot_layered_correlation_flow_chart(layer_keys,
+                                        adjacency_df: pd.DataFrame,
+                                        prog_names_dict,
+                                        title: str,
+                                        # parameter layout that can be 'straight' or 'fan'
+                                        layout_type: Literal['straight', 'fan'] = 'straight',
+                                        plt_figure_kwargs: Dict = None,
+                                        fig_title_kwargs: Dict = None) -> plt.Figure:
     """
     Plotting the flow chart of the correlation matrix between layers.
     """
@@ -231,13 +235,19 @@ def plot_layered_correlation_flow_chart(layer_keys, adjacency_df: pd.DataFrame,
     layout = nx.multipartite_layout(G, subset_key='layer')
 
     edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
-    edge_width = 15 * np.power(weights, 2)  # visual edge emphesis
+    edge_width = 15 * np.power(weights, 2)  # visual edge emphasis
 
     if len(layer_keys) > 2:
         for layer in {data['layer'] for key, data in G.nodes.data()}:
             nodes = [node for node in G.nodes if name_map[node.split('.')[0]] == layer]
 
-            angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+            if layout_type == 'straight':
+                angles = np.linspace(-np.pi / 4, np.pi / 4, len(nodes))
+            elif layout_type == 'fan':
+                rank = len(nodes)
+                angles = np.linspace(-np.pi * rank / 72, np.pi * rank / 72, rank)
+            else:
+                raise NotImplementedError(f'layout type {layout_type} is not implemented')
 
             for i, node in enumerate(nodes):
                 layout[node] = [layer + 2 * np.cos(angles[i]), np.sin(angles[i])]
