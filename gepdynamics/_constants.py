@@ -12,7 +12,7 @@ PROJECT_HOME_PATH = {
 
 EXCEL_FINGERPRINT_TEMPLATE = os.path.join(os.path.dirname(__file__), 'static', 'fingerprint_template.xlsx')
 
-## Constants
+# # Constants
 # Data parameters
 NUMBER_HVG = 2000
 
@@ -26,7 +26,7 @@ NON_NEG_CMAP = cubehelix_palette(start=.5, rot=-.3, light=1, as_cmap=True)
 N_COMPARED_RANKED = 1000 # number of top ranked genes to compare
 
 
-## Classes
+# # Classes
 class NMFEngine(str, Enum):
     """
     Which engine to use when decomposing data using NMF

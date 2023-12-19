@@ -591,16 +591,17 @@ class Comparator(object):
     # ToDo: add colors
     """
     def __init__(self,
+                 results_dir: _utils.PathLike,
                  adata_a: sc.AnnData,
                  usages_matrix_a: np.ndarray,
+                 highly_variable_genes_key: str,
                  adata_b: sc.AnnData,
-                 results_dir: _utils.PathLike,
+                 usages_matrix_b: np.ndarray = None,
+                 tpm_target_sum: int = 100_000,
                  nmf_engine: NMFEngine = NMFEngine.sklearn,
                  beta_loss: str = 'kullback-leibler',
                  max_nmf_iter: int = 800,
                  max_added_rank: int = 3,
-                 highly_variable_genes: Union[str, int] = NUMBER_HVG,
-                 tpm_target_sum: int = 100_000,
                  decomposition_normalization_method: typing.Literal['variance', 'variance_cap'] = 'variance',
                  coefs_variance_normalization: typing.Literal[None, 'variances_norm'] = None,
                  device: str = None,
@@ -612,11 +613,17 @@ class Comparator(object):
         Parameters
         ----------
         adata_a : sc.AnnData
-            Annotated data for timepoint A.
+            Annotated data for timepoint A. adata.X must be raw counts.
         usages_matrix_a : np.ndarray
             Usages matrix for timepoint A.
+        highly_variable_genes_key : str
+            The adata_a.var key for joint highly variable genes. The genes must
+            appear in adata_b.var_names
         adata_b : sc.AnnData
-            Annotated data for timepoint B.
+            Annotated data for timepoint B. adata.X must be raw counts.
+        usages_matrix_b : np.ndarray, optional
+            Usages matrix for timepoint B. If None, the usages matrix will be
+            calculated de-novo. by default None.,
         results_dir : _utils.PathLike
             Path to the directory where results will be stored.
         nmf_engine : NMFEngine, optional
@@ -627,10 +634,6 @@ class Comparator(object):
             Maximum number of iterations for NMF, by default 800.
         max_added_rank : int, optional
             Maximum additional rank for GEPs, by default 3.
-        highly_variable_genes : Union[str, int], optional
-            Either the adata_a.var key for joint highly variable genes, or the
-            number of automatically found jointly highly variable genes for the
-             two datasets. by default `_constants.NUMBER_HVG`.
         tpm_target_sum : int, optional
             target sum of transcript per (num) normalization as part of 
             calculating the gene coefficients (prior to log transform and
@@ -654,37 +657,39 @@ class Comparator(object):
             Level of verbosity for logging. Valid values are 0 (no logging),
             1 (minimal logging), and 2 (detailed logging). Defaults to 0.
         """
+        self.results_dir = _utils.set_dir(results_dir)
+        self.verbosity = verbosity
 
         self.adata_a = adata_a
         self.usages_matrix_a = usages_matrix_a
-        self.rank_a = self.usages_matrix_a.shape[1]
+        if highly_variable_genes_key not in adata_a.var_keys():
+            raise KeyError(f"adata_a.var does not contain key {highly_variable_genes_key}")
+        self.joint_hvgs = adata_a.var.index[adata_a.var[highly_variable_genes_key]]
+        self.rank_a = usages_matrix_a.shape[1]
+
         self.adata_b = adata_b
+        if usages_matrix_b is None:
+            self.usages_matrix_b = None
+            self.rank_b = self.rank_a
+        else:
+            self.usages_matrix_b = usages_matrix_b
+            self.rank_b = usages_matrix_b.shape[1]
         self.a_sname = self.adata_a.uns['sname']
         self.b_sname = self.adata_b.uns['sname']
         self.tpm_target_sum = tpm_target_sum
-
-        self.results_dir = _utils.set_dir(results_dir)
-        self.verbosity = verbosity
 
         self.beta_loss = beta_loss
         self.max_nmf_iter = max_nmf_iter
         self.max_added_rank = max_added_rank
         self.nmf_engine = nmf_engine
-        self.decomposition_normalization_method = decomposition_normalization_method
+        if decomposition_normalization_method in ['variance', 'variance_cap']:
+            self.decomposition_normalization_method = decomposition_normalization_method
+        else:
+            raise ValueError(f"decomposition_normalization_method must be one of"
+                             f" ['variance', 'variance_cap'], "
+                             f"got {decomposition_normalization_method}")
         self.coefs_variance_normalization = coefs_variance_normalization
         self.device = device
-
-        if isinstance(highly_variable_genes, str):
-            if highly_variable_genes not in self.adata_a.var.keys():
-                raise KeyError(f"adata_a.var does not contain key {highly_variable_genes}")
-        elif isinstance(highly_variable_genes, int):
-            assert highly_variable_genes <= self.adata_a.n_vars, \
-                f"Number of highly variable genes {highly_variable_genes} " \
-                f"exceeds the number of genes in adata_a ({self.adata_a.n_vars})"
-        else:
-            # wrong type of highly variable genes
-            raise TypeError(f"highly_variable_genes must be either str or int")
-        self.joint_hvgs = highly_variable_genes
 
         # Fields to be filled in later
         self.geps_a = None
@@ -804,18 +809,17 @@ class Comparator(object):
         new_instance.adata_b = adata_b
         return new_instance
 
-    def _normalize_adata_for_decomposition(self, adata: sc.AnnData,
-                                           method: typing.Literal['variance', 'variance_cap'] = 'variance',
-                                           min_cell_per_gene_percent: float = 1.) -> np.ndarray:
+    def _normalize_adata_for_decomposition(
+            self, adata: sc.AnnData,
+            method: typing.Literal['variance', 'variance_cap'] = 'variance',
+            min_cell_per_gene_percent: float = 1.) -> np.ndarray:
         """
         Normalize adata for decomposition, fit the data type to `self.usages_matrix_a.dtype`.
         """
-
-        normalized = _utils.subset_and_normalize_for_nmf(
+        return _utils.subset_and_normalize_for_nmf(
             adata, subset_by=self.joint_hvgs, method=method,
             min_cells_percent=min_cell_per_gene_percent,
             dtype=self.usages_matrix_a.dtype)
-        return normalized
 
     def _run_nmf_with_known_usages(self,
                                    usages_matrix: np.ndarray,
@@ -862,29 +866,14 @@ class Comparator(object):
             W=H.T,
             H=W.T)
 
-    def extract_geps_on_jointly_hvgs(self, min_cells_per_gene: int = 5):
+    def extract_geps_on_jointly_hvgs(self):
         """
         Identify Gene Expression Programs (GEPs) on genes that are highly variable
-        across both timepoints A and B.
-
-        This method can operate in two modes depending on the type of `self.joint_hvgs`:
-        1. If `self.joint_hvgs` is an integer, it selects that number of top highly variable genes based on
-           the combined variability ranking from both timepoints.
-        2. If `self.joint_hvgs` is a string, it is assumed to be a key in `adata_a.var`,
-         and the method uses the corresponding variable genes already annotated in `adata_a`.
+        across both timepoints A & B.
 
         After selecting the highly variable genes, the method performs normalization
         and re-decomposes timepoint A using the known usages matrix, this time
         on the jointly highly variable genes.
-
-        Parameters
-        ----------
-        min_cells_per_gene : int, optional
-            Minimum number of cells in which a gene must be expressed to be considered in the analysis.
-            This parameter is only used if `self.joint_hvgs` is an integer. Defaults to 5.
-        coefs_variance_normalization : typing.Literal[None, 'variances_norm'], optional
-            Whether to normalize the gene coefficients by the normalized variances
-            of the genes, by default None.
 
         Raises
         ------
@@ -895,26 +884,8 @@ class Comparator(object):
         -----
         The method sets the object to the PREPARED stage upon successful completion.
         """
-        # assert state is INITIALIZED
         if self.stage != Stage.INITIALIZED:
             raise RuntimeError(f"Stage is {self.stage}, expected {Stage.INITIALIZED}")
-
-        # if joint_hvgs is numeric, use it as the number of joint genes
-        if isinstance(self.joint_hvgs, int):
-            genes_subset = (self.adata_a.var.n_cells >= min_cells_per_gene) & (
-                self.adata_b.var.n_cells >= min_cells_per_gene)
-            hvg_a = sc.pp.highly_variable_genes(
-                self.adata_a[:, genes_subset], flavor='seurat_v3', n_top_genes=100_000, inplace=False)
-            hvg_b = sc.pp.highly_variable_genes(
-                self.adata_b[:, genes_subset], flavor='seurat_v3', n_top_genes=100_000, inplace=False)
-            joint_hvg_rank = hvg_a.highly_variable_rank + hvg_b.highly_variable_rank
-            self.joint_hvgs = joint_hvg_rank.sort_values()[: self.joint_hvgs].index
-        elif isinstance(self.joint_hvgs, str):
-            self.joint_hvgs = self.adata_a.var.index[self.adata_a.var[self.joint_hvgs]]
-        elif isinstance(self.joint_hvgs, pd.core.indexes.base.Index):
-            pass
-        else:
-            raise TypeError(f"joint_hvgs must be either int or a key in `adata_a.var`")
 
         if self.verbosity > 0:
             print(f'Extracting A GEPs on jointly highly variable genes')
@@ -925,17 +896,10 @@ class Comparator(object):
         self.a_result = self._run_nmf_with_known_usages(
             self.usages_matrix_a, X_a, 'A')
 
-        self.geps_a = self.a_result.H / np.linalg.norm(self.a_result.H, ord=2, axis=1, keepdims=True)
+        self.geps_a = self.a_result.H / np.linalg.norm(
+            self.a_result.H, ord=2, axis=1, keepdims=True)
 
-        # mask filtered genes from the data normalizatoin
-        if self.decomposition_normalization_method is None:
-            min_cells = (self.adata_b.shape[0] * 1. / 100)
-            X = self.adata_b[:, self.joint_hvgs].X
-            if isinstance(X, _utils.sparse.spmatrix):
-                X = X.toarray()
-            self.geps_a = self.geps_a[np.count_nonzero(X, axis=0) > min_cells]
-
-        # calculate gene coefs for each GEP
+        # calculate gene coefficients for each GEP
         if self.coefs_variance_normalization is None:
             NMFResultBase.calculate_gene_coefficients_list(
                 self.adata_a, [self.a_result], self.tpm_target_sum)
@@ -1015,7 +979,8 @@ class Comparator(object):
         plt.close()
 
     def decompose_b(self, repeats: int = 1,
-                    precalculated_denovo_usage_matrices: List[np.ndarray] = None,):
+                    precalculated_denovo_usage_matrices: List[np.ndarray] = None,
+                    min_cell_per_gene_percent: float = 1.):
         """
         Decompose timepoint B data de-novo and using timepoint A GEP matrix with additional degrees of freedom.
 
@@ -1029,9 +994,8 @@ class Comparator(object):
             # TBD: add support for repeats > 1 in de-novo and fnmf (requires random initialization)
         precalculated_denovo_usage_matrices : List[np.ndarray], optional
             Pre-calculated usage matrices for de-novo decomposition, if available. Defaults to None.
-        coefs_variance_normalization : typing.Literal[None, 'variances_norm'], optional
-            Whether to normalize the gene coefficients by the normalized variances
-            of the genes, by default None.
+        min_cell_per_gene_percent : float, optional
+            Minimum percentage of cells per gene to be considered for decomposition.
 
         Raises
         ------
@@ -1049,12 +1013,17 @@ class Comparator(object):
             raise RuntimeError('Must extract GEPs on jointly HVGs first')
 
         X_b = self._normalize_adata_for_decomposition(
-            self.adata_b, self.decomposition_normalization_method, -1)
+            self.adata_b, self.decomposition_normalization_method, min_cell_per_gene_percent)
+
+        # mask filtered genes from the data normalization
+        if self.decomposition_normalization_method == 'variance':
+            min_cells = (self.adata_b.shape[0] * min_cell_per_gene_percent / 100)
+            geps_a = self.geps_a[np.count_nonzero(X_b, axis=0) > min_cells]
 
         if self.nmf_engine == NMFEngine.sklearn:
             if self.verbosity > 0:
                 print('Decomposing B using A GEPs and no additional GEPs')
-            self._decompose_b_fnmf(X_b)
+            self._decompose_b_fnmf(X_b, geps_a)
 
             if self.verbosity > 0:
                 print('Decomposing B de-novo')
@@ -1066,7 +1035,7 @@ class Comparator(object):
 
             if self.verbosity > 0:
                 print('Decomposing B using A GEPs and no additional GEPs')
-            self._decompose_b_fnmf(X_b, tens)
+            self._decompose_b_fnmf(X_b, geps_a, tens)
 
             if self.verbosity > 0:
                 print('Decomposing B de-novo')
@@ -1080,7 +1049,7 @@ class Comparator(object):
 
         if self.verbosity > 0:
             print(f'Decomposing B using A GEPs and up to {self.max_added_rank} additional GEPs')
-        self._decompose_b_pfnmf(X_b, repeats)
+        self._decompose_b_pfnmf(X_b, geps_a, repeats)
 
         self._all_results = self.denovo_results + [self.fnmf_result] + self.pfnmf_results
 
@@ -1098,7 +1067,9 @@ class Comparator(object):
 
         self.stage = Stage.DECOMPOSED
 
-    def _decompose_b_fnmf(self, X_b: np.ndarray, tens: 'torch.Tensor' = None):
+    def _decompose_b_fnmf(self, X_b: np.ndarray,
+                          geps_a: np.ndarray,
+                          tens: 'torch.Tensor' = None):
         """
         Decompose timepoint B data using timepoint A GEPs and no additional GEPs
 
@@ -1106,9 +1077,10 @@ class Comparator(object):
         ----------
         """
 
+
         # X_b ~ W @ geps_a
         nmf_kwargs = {
-            'H': self.geps_a.copy(),
+            'H': geps_a.copy(),
             'update_H': False,
             'n_components': self.rank_a,
             'tol': NMF_TOLERANCE,
@@ -1163,7 +1135,7 @@ class Comparator(object):
                     usages_matrices[added_rank], X_b, f'dn_{rank}', tens)
                 )
 
-    def _decompose_b_pfnmf(self, X_b: np.ndarray, repeats: int = 1):
+    def _decompose_b_pfnmf(self, X_b: np.ndarray, geps_a: np.ndarray, repeats: int = 1):
         """
         Decompose timepoint B data using timepoint A GEP matrix with 1,2,3 additional degrees of freedom.
 
@@ -1187,7 +1159,7 @@ class Comparator(object):
 
             for repeat in range(repeats):
                 w1, h1, w2, h2, n_iter = pfnmf.pfnmf(
-                    X_b.T, self.geps_a.T, rank_2=added_rank,
+                    X_b.T, geps_a.T, rank_2=added_rank,
                     beta_loss=self.beta_loss, tol=NMF_TOLERANCE,
                     max_iter=self.max_nmf_iter, verbose=(self.verbosity > 1))
 
