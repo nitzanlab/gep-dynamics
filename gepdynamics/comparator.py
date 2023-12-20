@@ -691,10 +691,7 @@ class Comparator(object):
         self.beta_loss = beta_loss
         self.max_nmf_iter = max_nmf_iter
         self.max_added_rank = max_added_rank
-        if nmf_engine in NMFEngine:
-            self._nmf_engine = nmf_engine
-        else:
-            raise ValueError(f"_nmf_engine must be one of {NMFEngine}, got {nmf_engine}")
+        self._nmf_engine = NMFEngine(nmf_engine)
 
         if decomposition_normalization_method in ['variance', 'variance_cap']:
             self.decomposition_normalization_method = decomposition_normalization_method
