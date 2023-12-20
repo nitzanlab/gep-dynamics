@@ -348,8 +348,9 @@ class NMFResultBase(object):
             plt.close()
 
     def plot_utilization_scatter(self, coordinates: np.ndarray,
-                                saving_folder: _utils.PathLike = None,
-                                save: bool = True, show: bool = False):
+                                 coordinates_system: str = 'UMAP',
+                                 saving_folder: _utils.PathLike = None,
+                                 save: bool = True, show: bool = False):
         """
         Plots a scatter plot of utilization patterns based on given coordinates.
 
@@ -390,9 +391,9 @@ class NMFResultBase(object):
 
             ax = plt.gca()
 
-            ax.set_xlabel('UMAP 1')
-            ax.set_ylabel('UMAP 2')
-            ax.set_title(f'Program Utilization UMAP')
+            ax.set_xlabel(f'{coordinates_system} 1')
+            ax.set_ylabel(f'{coordinates_system} 2')
+            ax.set_title(f'Program Utilization {coordinates_system}')
 
             ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
 
@@ -858,8 +859,7 @@ class Comparator(object):
                 data.T, **nmf_kwargs, verbose=(self.verbosity > 1))
 
         loss_per_cell = pfnmf.calc_beta_divergence(
-            data.T, W, np.zeros((W.shape[0], 0)),
-            H, np.zeros((0, H.shape[1])), per_column=True)
+            data.T, W=W, H=H, beta_loss=self.beta_loss, per_column=True)
 
         return NMFResult(
             name=name,
@@ -1163,7 +1163,7 @@ class Comparator(object):
                     max_iter=self.max_nmf_iter, verbose=(self.verbosity > 1))
 
                 loss_per_cell = pfnmf.calc_beta_divergence(
-                    X_b.T, w1, w2, h1, h2, self.beta_loss, per_column=True)
+                    X_b.T, w1, w2, h1, h2, beta_loss=self.beta_loss, per_column=True)
 
                 final_loss = np.sum(loss_per_cell)
 
@@ -1230,7 +1230,6 @@ class Comparator(object):
 
         self._plot_loss_per_cell_histograms(max_kde_value, show, save)
         self._plot_usages_clustermaps(show, save)
-        self._plot_utilization_scatters(show, save)
 
         self.plot_correlations_flow_chart([self.fnmf_result, *self.pfnmf_results, *self.denovo_results[::-1]],
                                           usage_corr_threshold = 0.25,
@@ -1358,28 +1357,57 @@ class Comparator(object):
                     f'{res.name}_normalized_usages_violin_plots.png'),
                 show=show)
 
-    # plot utilization scatters for all the decompositions
-    def _plot_utilization_scatters(self, show: bool = False, save: bool = True):
+    def plot_utilization_scatters(self, coordinates_obsm_key: str,
+                                  coordinates_system: str = None,
+                                  show: bool = False, save: bool = True):
         """
-        Plot the utilization scatters for all the decompositions
+        Plots the utilization scatters for all decompositions.
+
+        This function generates scatter plots for the utilization patterns of all
+        decompositions. If save=True the plots are saved in a new directory
+        'programs_projections' within the results directory. The coordinates for
+        the scatter plots are retrieved from the 'obsm' attribute of 'adata_a'
+        and 'adata_b'. If show=True the plots are displayed.
+
+        Parameters
+        ----------
+        coordinates_obsm_key : str
+            The key to access the coordinates from the obsm attribute of the
+             AnnData objects.
+        coordinates_system : str, optional
+            The name of the coordinates system. If coordinates_system is set to
+            None, and coordinates_obsm_key starts with 'X_', the method will
+            automatically set coordinates_system to the substring of the key
+            after 'X_' (e.g. X_umap->UMAP), Defaults to None.
+        show : bool, optional
+            If True, the plots will be displayed. Defaults to False.
+        save : bool, optional
+            If True, the plots will be saved. Defaults to True.
+
+        Returns
+        -------
+        None
         """
 
         projections_folder = _utils.set_dir(self.results_dir.joinpath('programs_projections'))
 
+        if (coordinates_system is None) and (coordinates_obsm_key.startswith('X_')):
+            coordinates_system = coordinates_obsm_key[2:].upper()
+
         self.a_result.plot_utilization_scatter(
-            self.adata_a.obsm['X_umap'],
+            self.adata_a.obsm[coordinates_obsm_key], coordinates_system,
             saving_folder=projections_folder, show=show, save=save)
 
         for res in self._all_results:
             res.plot_utilization_scatter(
-                self.adata_b.obsm['X_umap'],
+                self.adata_b.obsm[coordinates_obsm_key], coordinates_system,
                 saving_folder=projections_folder, show=show, save=save)
 
 
     def plot_decomposition_comparisons(self, show: bool = False,
                                        save: bool = True, max_cell_loss: float = 2000):
         """
-        Plot comparisons of pfnmf and de-novo decompositions with similar ranks
+        Plot comparisons of pfnmf and de-novo decompositions
 
         """
         if self.stage in (Stage.INITIALIZED, Stage.PREPARED):
@@ -1677,7 +1705,7 @@ class Comparator(object):
         Calculate the comparisons between de-novo and f/pfNMF GEPs.
         Performs GEP usages correlation  and TSC on the gene coefficients
 
-        for each rank of decomposition outputs a dataframe with the prog_names:
+        for each rank of decomposition outputs a dataframe with the columns:
         pfnmf_gep, dn_coef_gep, dn_coef_tsc, dn_usage_gep, dn_usage_corr
         """
         output = []
@@ -1720,10 +1748,9 @@ class Comparator(object):
         else:
             W, H, _ = sknmf.non_negative_factorization(x, **nmf_kwargs, verbose=verbose)
 
-        # X ~ W @ H, transpose for cells to be prog_names
+        # X ~ W @ H, transpose for cells to be columns
         loss_per_cell = pfnmf.calc_beta_divergence(
-            x.T, H.T, np.zeros((H.shape[1], 0)),
-            W.T, np.zeros((0, W.shape[0])), per_column=True)
+            x.T, W=H.T, H=W.T, beta_loss=nmf_kwargs['beta_loss'], per_column=True)
 
         return NMFResult(
             name=name,

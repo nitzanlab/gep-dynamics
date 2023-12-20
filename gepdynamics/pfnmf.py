@@ -180,7 +180,7 @@ def pfnmf(X, w1, h1=None, w2=None, h2=None, rank_2: int = None,
 
     def calc_error(w_1, w_2, h_1, h_2) -> float:
         '''Calculate the error according to the beta loss and X'''
-        return calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss)
+        return calc_beta_divergence(X, w_1, w_2, h_1, h_2, beta_loss=beta_loss)
 
     error_at_init = calc_error(w1, w2, h1, h2)
     previous_error = error_at_init

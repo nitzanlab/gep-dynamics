@@ -571,7 +571,6 @@ def plot_usages_norm_violin(
     prog_order = hierarchy.leaves_list(hierarchy.optimal_leaf_ordering(
         linkage, u_data.X.T))
 
-
     vp = sc.pl.stacked_violin(
         u_data, u_data.var_names[prog_order], groupby=group_by_key,
         return_fig=True, dendrogram=True, title=title)
