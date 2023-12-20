@@ -594,10 +594,11 @@ class Comparator(object):
     def __init__(self,
                  results_dir: _utils.PathLike,
                  adata_a: sc.AnnData,
-                 usages_matrix_a: np.ndarray,
+                 # usages matrix a can be either ndarray or nmfresultbase object
+                 usages_matrix_a: Union[np.ndarray, NMFResultBase],
                  highly_variable_genes_key: str,
                  adata_b: sc.AnnData,
-                 usages_matrix_b: np.ndarray = None,
+                 usages_matrix_b: Union[np.ndarray, NMFResultBase] = None,
                  tpm_target_sum: int = 100_000,
                  nmf_engine: NMFEngine = NMFEngine.sklearn,
                  beta_loss: str = 'kullback-leibler',
@@ -615,16 +616,18 @@ class Comparator(object):
         ----------
         adata_a : sc.AnnData
             Annotated data for timepoint A. adata.X must be raw counts.
-        usages_matrix_a : np.ndarray
-            Usages matrix for timepoint A.
+        usages_matrix_a : np.ndarray or NMFResultBase
+            Usages matrix for timepoint A. If type is NMFResultBase, the usages
+            matrix will be extracted from the object.
         highly_variable_genes_key : str
             The adata_a.var key for joint highly variable genes. The genes must
             appear in adata_b.var_names
         adata_b : sc.AnnData
             Annotated data for timepoint B. adata.X must be raw counts.
-        usages_matrix_b : np.ndarray, optional
-            Usages matrix for timepoint B. If None, the usages matrix will be
-            calculated de-novo. by default None.,
+        usages_matrix_b : np.ndarray or NMFResultBase, optional
+            Usages matrix for timepoint B. If type is NMFResultBase, the usages
+            matrix will be extracted from the object. If None, the usages matrix
+            will be calculated de-novo. by default None.
         results_dir : _utils.PathLike
             Path to the directory where results will be stored.
         nmf_engine : NMFEngine, optional
@@ -662,16 +665,22 @@ class Comparator(object):
         self.verbosity = verbosity
 
         self.adata_a = adata_a
-        self.usages_matrix_a = usages_matrix_a
+        if isinstance(usages_matrix_a, NMFResultBase) or hasattr(usages_matrix_a, 'norm_usages'):
+            self.usages_matrix_a = usages_matrix_a.norm_usages
+        else:
+            self.usages_matrix_a = usages_matrix_a
         if highly_variable_genes_key not in adata_a.var_keys():
             raise KeyError(f"adata_a.var does not contain key {highly_variable_genes_key}")
         self.joint_hvgs = adata_a.var.index[adata_a.var[highly_variable_genes_key]]
-        self.rank_a = usages_matrix_a.shape[1]
+        self.rank_a = self.usages_matrix_a.shape[1]
 
         self.adata_b = adata_b
         if usages_matrix_b is None:
             self.usages_matrix_b = None
             self.rank_b = self.rank_a
+        elif isinstance(usages_matrix_b, NMFResultBase) or hasattr(usages_matrix_b, 'norm_usages'):
+            self.usages_matrix_b = usages_matrix_b.norm_usages
+            self.rank_b = usages_matrix_b.rank
         else:
             self.usages_matrix_b = usages_matrix_b
             self.rank_b = usages_matrix_b.shape[1]
