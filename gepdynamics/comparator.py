@@ -665,10 +665,11 @@ class Comparator(object):
         self.verbosity = verbosity
 
         self.adata_a = adata_a
-        if isinstance(usages_matrix_a, NMFResultBase) or hasattr(usages_matrix_a, 'norm_usages'):
-            self.usages_matrix_a = usages_matrix_a.norm_usages
+        if isinstance(usages_matrix_a, NMFResultBase) or hasattr(usages_matrix_a, 'W'):
+            self.usages_matrix_a = usages_matrix_a.W
         else:
             self.usages_matrix_a = usages_matrix_a
+
         if highly_variable_genes_key not in adata_a.var_keys():
             raise KeyError(f"adata_a.var does not contain key {highly_variable_genes_key}")
         self.joint_hvgs = adata_a.var.index[adata_a.var[highly_variable_genes_key]]
@@ -678,8 +679,8 @@ class Comparator(object):
         if usages_matrix_b is None:
             self.usages_matrix_b = None
             self.rank_b = self.rank_a
-        elif isinstance(usages_matrix_b, NMFResultBase) or hasattr(usages_matrix_b, 'norm_usages'):
-            self.usages_matrix_b = usages_matrix_b.norm_usages
+        elif isinstance(usages_matrix_b, NMFResultBase) or hasattr(usages_matrix_b, 'W'):
+            self.usages_matrix_b = usages_matrix_b.W
             self.rank_b = usages_matrix_b.rank
         else:
             self.usages_matrix_b = usages_matrix_b
