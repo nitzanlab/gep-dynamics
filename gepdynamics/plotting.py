@@ -52,7 +52,7 @@ def load_data_for_lung_dev_sanky(zepp_results_dir: _utils.PathLike):
     return adata_a, adata_b, adata_c
 
 
-def plot_sankey_for_lung_dev(adata_a, adata_b, adata_c,
+def plot_sankey_for_lung_dev(nmf_res_a, nmf_res_b, nmf_res_c,
                              gene_list_cutoff=401,
                              cutoff=801, # cutoff for coefficient ranks in comparison
                              threshold_counts=100):
@@ -64,9 +64,9 @@ def plot_sankey_for_lung_dev(adata_a, adata_b, adata_c,
     # according to best rank
     """
 
-    orig_coefs_a = adata_a.varm['usage_coefs'].copy()
-    orig_coefs_b = adata_b.varm['usage_coefs'].copy()
-    orig_coefs_c = adata_c.varm['usage_coefs'].copy()
+    orig_coefs_a = nmf_res_a.gene_coefs.copy()
+    orig_coefs_b = nmf_res_b.gene_coefs.copy()
+    orig_coefs_c = nmf_res_c.gene_coefs.copy()
 
     # getting background genes
     coefs = np.hstack([orig_coefs_a.values,
