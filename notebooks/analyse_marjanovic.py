@@ -46,13 +46,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import scanpy as sc
 
-sc.settings.n_jobs=-1
+sc.settings.n_jobs = -1
 
-from gepdynamics import _utils
-from gepdynamics import _constants
-from gepdynamics import cnmf
-from gepdynamics import pfnmf
-from gepdynamics import comparator
+from gepdynamics import _utils, _constants, cnmf, pfnmf, comparator, plotting
 
 _utils.cd_proj_home()
 print(os.getcwd())
@@ -62,10 +58,12 @@ print(os.getcwd())
 # ### Downloading or loading AnnData object
 
 # %%
-# %%time
 results_dir = _utils.set_dir('results')
 results_dir = _utils.set_dir(results_dir.joinpath('marjanovic'))
 data_dir = _utils.set_dir('data')
+
+# %%
+# %%time
 
 orig_adata_path = data_dir.joinpath('marjanovic_mmLungPlate.h5ad')
 
@@ -125,8 +123,6 @@ else:
     adata = sc.read_h5ad(orig_adata_path)
 
 adata
-
-
 
 # %%
 with warnings.catch_warnings():
@@ -236,7 +232,6 @@ del column_of_interest, stats_df
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=UserWarning)
->>>>>>> 71cf832 (wip marjanovic analysis)
     
     sc.external.pl.phate(adata, color=['clusterK12', 'timesimple'])
 
@@ -317,6 +312,8 @@ for cat in categories:
 
 # %%
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
+beta_loss = 'kullback-leibler'
+tpm_target_sum = 1_000_000
 
 
 # %%
@@ -334,7 +331,7 @@ for cat in categories:
     X = _utils.subset_and_normalize_for_nmf(tmp, method='variance_cap')
     
     c_object.prepare(X, ks, n_iter=120, new_nmf_kwargs={
-        'tol': _constants.NMF_TOLERANCE, 'beta_loss': 'kullback-leibler', 'max_iter': 1000})
+        'tol': _constants.NMF_TOLERANCE, 'beta_loss': beta_loss, 'max_iter': 1000})
     
     c_object.factorize(0, 1, gpu=True)
     
@@ -398,7 +395,7 @@ for cat, (k, threshold) in selected_cnmf_params.items():
 
     # X ~ W @ H, transpose for cells to be columns
     loss_per_cell = pfnmf.calc_beta_divergence(
-        c_object.X.T, W = spectra.T, H = usages.T, per_column=True)
+        c_object.X.T, W = spectra.T, H = usages.T, beta_loss=beta_loss, per_column=True)
 
     res = comparator.NMFResult(
         name=f'{tmp.uns["sname"]}_k{k}',
@@ -408,7 +405,7 @@ for cat, (k, threshold) in selected_cnmf_params.items():
         H=spectra)
     
     comparator.NMFResultBase.calculate_gene_coefficients_list(
-        tmp, [res], target_sum=1_000_000, target_variance=tmp.var['variances_norm'].values)
+        tmp, [res], target_sum=tpm_target_sum, target_variance=tmp.var['variances_norm'].values)
     
     decompositions[cat] = {k: res}
 
@@ -456,8 +453,6 @@ for cat in categories:
         print(res.prog_percentages)
 
 # %%
-
-# %%
 color_obs_by = 'clusterK12'
 decomposition_images = _utils.set_dir(split_adatas_dir.joinpath("images"))
 
@@ -478,7 +473,7 @@ with warnings.catch_warnings():  # supress scanpy plotting warning
 
         # usages clustermap
         un_sns = _utils.plot_usages_norm_clustermaps(
-            tmp, normalized_usages=res.norm_usages, columns=res.prog_names,
+            tmp, normalized_usages=res.norm_usages, prog_names=res.prog_names,
             title=f'{cat}', show=False, sns_clustermap_params={
                 'row_colors': tmp.obs[color_obs_by].map(tmp.uns[f'{color_obs_by}_colors_dict'])})
         un_sns.savefig(decomposition_images.joinpath(f"{cat}_usages_norm.png"),
@@ -487,8 +482,92 @@ with warnings.catch_warnings():  # supress scanpy plotting warning
 
         # usages violin plot
         _utils.plot_usages_norm_violin(
-            tmp, color_obs_by, save_path=decomposition_images.joinpath(
+            tmp, color_obs_by, normalized_usages=res.norm_usages, prog_names=res.prog_names,
+            save_path=decomposition_images.joinpath(
                 f'{cat}_norm_usage_per_lineage.png'))
+
+# %% [markdown]
+# ### Examining programs dynamics by rank
+#
+
+# %%
+# %%time
+
+k_min = 2
+k_max = 7
+
+for cat in categories:
+    print(f'Working on {cat}')
+    tmp = split_adatas[cat]
+    
+    c_object = cnmf.cNMF(cnmf_dir, cat)
+    threshold = tmp.uns['cnmf_params']['threshold']
+    
+    for k in range(k_min, k_max + 1):
+        if k in decompositions[cat].keys():
+            continue
+
+        print(f'Working on k={k}')
+        try:
+            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+        except FileNotFoundError:
+            print(f'Calculating consensus NMF for k={k}')
+            c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                               consensus_method='mean',
+                               nmf_refitting_iters=1000, show_clustering=False)
+
+            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+            
+        # X ~ W @ H, transpose for cells to be columns
+        loss_per_cell = pfnmf.calc_beta_divergence(
+            c_object.X.T, W = spectra.T, H = usages.T, per_column=True)
+    
+        res = comparator.NMFResult(
+            name=f'{tmp.uns["sname"]}_k{k}',
+            loss_per_cell=loss_per_cell,
+            rank=k,
+            W=usages,
+            H=spectra)
+        
+        comparator.NMFResultBase.calculate_gene_coefficients_list(
+            tmp, [res], target_sum=1_000_000, target_variance=tmp.var['variances_norm'].values)
+        
+        decompositions[cat][k] = res
+    
+    print()
+
+# %%
+decomposition_images = _utils.set_dir(split_adatas_dir.joinpath("images"))
+
+tsc_threshold: float = 0.3
+tsc_truncation_level: int = 1000
+
+for cat in categories:
+    results = [decompositions[cat][i] for i in range(k_min, k_max + 1)]
+    names_list = [res.name.split('_')[1] for res in results]
+    ks, joint_names, joint_usages, joint_labels = comparator.NMFResultBase.aggregate_results(results)
+    prog_names_dict = {res.name.split('_')[1]: [name.split('_')[1] for name in res.prog_names] for res in results}
+    joint_names = [name.split('_')[1] for name in joint_names]
+    
+    # genes flow graph
+    genes_title = f'{cat} flow chart of gene coefficients correlations for different decomposition ranks'
+    genes_filename = f'{cat}_flow_chart_genes_by_rank.png'
+    
+    tsc = _utils.truncated_spearmans_correlation(pd.concat(
+        [res.gene_coefs for res in results], axis = 1),
+        truncation_level = tsc_truncation_level, rowvar = False)
+    
+    genes_adjacency = plotting.get_ordered_adjacency_matrix(
+        tsc, joint_names, ks, tsc_threshold, verbose = True)
+    
+    fig = plotting.plot_layered_correlation_flow_chart(
+        names_list, genes_adjacency, prog_names_dict, genes_title, layout_type='fan')
+    
+    fig.savefig(decomposition_images.joinpath(genes_filename))
+    
+    plt.show()
+    plt.close()
+
 
 # %% [markdown]
 # ## 6. Running comparator on the data
@@ -511,43 +590,69 @@ pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,
 
 for cat_a, cat_b in pairs:
     print(f'comparing {cat_a} and {cat_b}')
-    comparison_dir = _utils.set_dir(results_dir.joinpath(f"comparator_{cat_a:.2s}_{cat_b:.2s}"))
     
     adata_a = split_adatas[cat_a]
     adata_b = split_adatas[cat_b]
     
+    comparison_dir = _utils.set_dir(results_dir.joinpath(
+        f"comparator_{adata_a.uns['sname']}_{adata_b.uns['sname']}"))
+    
     if os.path.exists(comparison_dir.joinpath('comparator.npz')):
         continue
-    #     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
-    # else:
-    cmp = comparator.Comparator(adata_a, adata_a.obsm['usages'], adata_b, comparison_dir,
-                                'torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
-                               highly_variable_genes='joint_highly_variable',
-                               tpm_target_sum=1_000_000)
-
-    print('decomposing')
-    cmp.extract_geps_on_jointly_hvgs()
+        # cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    else:
+        cmp = comparator.Comparator(
+            comparison_dir, adata_a, decompositions[cat_a][adata_a.uns['cnmf_params']['k_nmf']],
+            highly_variable_genes_key='joint_highly_variable',
+            adata_b=adata_b, usages_matrix_b=decompositions[cat_b][adata_b.uns['cnmf_params']['k_nmf']],
+            tpm_target_sum=tpm_target_sum,
+            nmf_engine='torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
+            decomposition_normalization_method='variance_cap',
+            coefs_variance_normalization='variances_norm')
     
-    # getting cnmf results
-    c_object = cnmf.cNMF(cnmf_dir, cat_b)
-    usages_matrices_b = []
-    
-    threshold = adata_b.uns['cnmf_params']['threshold']
-    for k in range(cmp.rank_a, cmp.rank_a + cmp.max_added_rank + 1):
-        try:
-            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
-        except FileNotFoundError:
-            print(f'Calculating consensus NMF for k={k} and threshold={threshold}')
-            c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
-                               consensus_method='mean',
-                               nmf_refitting_iters=1000, show_clustering=False)
-
-            usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+        print('decomposing')
+        cmp.extract_geps_on_jointly_hvgs()
         
-        usages_matrices_b.append(usages)
+        # getting cnmf results
+        c_object = cnmf.cNMF(cnmf_dir, cat_b)
+        
+        threshold = adata_b.uns['cnmf_params']['threshold']
+        for k in range(cmp.rank_b, cmp.rank_b + cmp.max_added_rank + 1):
+            if k in decompositions[cat_b].keys():
+                continue
+            
+            try:
+                usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+            except FileNotFoundError:
+                print(f'Calculating consensus NMF for k={k} and threshold={threshold}')
+                c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                                   consensus_method='mean',
+                                   nmf_refitting_iters=1000, show_clustering=False)
     
-    cmp.decompose_b(repeats = 5, precalculated_denovo_usage_matrices=usages_matrices_b)
+                usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+            
+            # X ~ W @ H, transpose for cells to be columns
+            loss_per_cell = pfnmf.calc_beta_divergence(
+                c_object.X.T, W = spectra.T, H = usages.T, beta_loss=beta_loss, per_column=True)
+        
+            res = comparator.NMFResult(
+                name=f'{tmp.uns["sname"]}_k{k}',
+                loss_per_cell=loss_per_cell,
+                rank=k,
+                W=usages,
+                H=spectra)
+            
+            comparator.NMFResultBase.calculate_gene_coefficients_list(
+                adata_b, [res], target_sum=cmp.tpm_target_sum,
+                target_variance=tmp.var['variances_norm'].values)
+            
+            decompositions[cat_b][k] = res
+        
+        
+        cmp.decompose_b(repeats = 5, precalculated_denovo_usage_matrices={k: res.norm_usages for k, res in decompositions[cat_b].items()})
     
+        cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
+
     cmp.print_errors()
     
     cmp.examine_adata_a_decomposition_on_jointly_hvgs(35, 3500)
@@ -562,17 +667,30 @@ for cat_a, cat_b in pairs:
                  gprofiler_kwargs=dict(organism='mmusculus',
                                        sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
 
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        warnings.filterwarnings("ignore", category=UserWarning)
+        cmp.plot_usages_violin(color_obs_by, show=False)
+    
+
+
+
+# %%
+
+for cat_a, cat_b in pairs:
+    print(f'comparing {cat_a} and {cat_b}')
+    
+    adata_a = split_adatas[cat_a]
+    adata_b = split_adatas[cat_b]
+    
+    comparison_dir = _utils.set_dir(results_dir.joinpath(
+        f"comparator_{adata_a.uns['sname']}_{adata_b.uns['sname']}"))
+    
+    cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+
     marker_genes = ['Krt8', 'Hopx', 'Klf6', 'Aqp5', 'Sftpa1', 'Sftpb', 'Sftpc',
                 'Mki67', 'Top2a', 'Rrm1', 'Rrm2',
                 'Sox2', 'Scgb3a2', 'Foxj1', 'Dynlrb2', 'Hoxa5', 'Col5a2', ]
     
     cmp.plot_marker_genes_heatmaps(marker_genes)
     
-    cmp.plot_usages_violin('celltype', show=False)
-    
-    cmp.save_to_file(comparison_dir.joinpath('comparator.npz'))
-
-
-
-# %%
-tmp.var
