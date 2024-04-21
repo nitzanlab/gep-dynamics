@@ -15,110 +15,89 @@ from scipy.stats import rankdata
 from scipy.cluster import hierarchy
 
 import gepdynamics._utils as _utils
+from gepdynamics.comparator import NMFResultBase
 
 pio.renderers.default = 'browser'
 # pio.renderers.default = 'svg'
 
 UNASSIGNED_GENES_COLUMN = 'unassigned'
 
-def get_rank_from_coefs(orig_coefs, gene_indices, cutoff):
+
+def get_rank_from_coefs(orig_coefficients, gene_indices, cutoff):
     """ create a dataframe of ranks up to cutoff from a dataframe of coefficients
     with unassigned column for genes that are equal between all programs"""
-    coefs = orig_coefs.iloc[gene_indices].copy()
-    tmp_none = 1 - (coefs==0).all(axis=1).astype(int) # if all prog_names are zero set to 0 else 1
-    coefs.loc[:,:] = rankdata(-coefs, axis=0)
-    coefs[UNASSIGNED_GENES_COLUMN] = tmp_none * cutoff
-    coefs[coefs > cutoff] = cutoff + 1
-    return coefs
+
+    coefficients = orig_coefficients.iloc[gene_indices].copy()
+    tmp_none = 1 - (coefficients==0).all(axis=1).astype(int) # if all prog_names are zero set to 0 else 1
+    coefficients.loc[:,:] = rankdata(-coefficients, axis=0)
+    coefficients[UNASSIGNED_GENES_COLUMN] = tmp_none * cutoff
+    coefficients[coefficients > cutoff] = cutoff + 1
+
+    return coefficients
 
 
-def load_data_for_lung_dev_sanky(zepp_results_dir: _utils.PathLike):
+def calculate_background_genes(nmf_results_list: List[NMFResultBase],
+                                 gene_list_cutoff=401):
     """
-    Load data for lung development dataset
-
-    >>> from gepdynamics.plotting import load_data_for_lung_dev_sanky
-    >>> adata_a, adata_b, adata_c = load_data_for_lung_dev_sanky(zepp_results_dir)
-
+    Calculate the background genes for joint best rank metric
     """
-    import scanpy as sc
-    from gepdynamics import _utils
 
-    zepp_results_dir = _utils.set_dir(zepp_results_dir)
+    # getting background genes, removing negative valued coefficients
+    joint_coefficients = np.hstack([nmf_res.gene_coefs.values for nmf_res in nmf_results_list])
+    ranked_data = rankdata(-joint_coefficients, axis=0)
+    ranked_data[joint_coefficients<=0] = gene_list_cutoff
+    ranked_data[ranked_data >= gene_list_cutoff] = gene_list_cutoff
+    bg_genes = np.where(ranked_data.min(axis=1) < gene_list_cutoff)[0]
 
-    adata_a = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"E12.h5ad"))
-    adata_b = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"E15.h5ad"))
-    adata_c = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"E17.h5ad"))
-
-    return adata_a, adata_b, adata_c
+    return bg_genes
 
 
-def plot_sankey_for_lung_dev(nmf_res_a, nmf_res_b, nmf_res_c,
-                             gene_list_cutoff=401,
-                             cutoff=801, # cutoff for coefficient ranks in comparison
-                             threshold_counts=100):
+def plot_sankey_for_nmf_results(nmf_results_list: List[NMFResultBase],
+                                gene_list_cutoff=401,
+                                cutoff=801, # cutoff for coefficient ranks in comparison
+                                display_threshold_counts=100):
     """
     Create Sankey plot for lung development dataset
 
     # Latest version: looking at genes that have high rank in one of the GEPs,
-    # and their coefficients are larger than one. Genes are passed between geps
+    # and their coefficients are larger than zero. Genes are passed between geps
     # according to best rank
     """
+    if len(nmf_results_list) < 2:
+        raise ValueError('Need at least two NMF results to compare')
 
-    orig_coefs_a = nmf_res_a.gene_coefs.copy()
-    orig_coefs_b = nmf_res_b.gene_coefs.copy()
-    orig_coefs_c = nmf_res_c.gene_coefs.copy()
+    # Get the background list of genes
+    bg_genes = calculate_background_genes(nmf_results_list, gene_list_cutoff)
 
-    # getting background genes
-    coefs = np.hstack([orig_coefs_a.values,
-                       orig_coefs_b.values,
-                       orig_coefs_c.values])
-    ranked_data = rankdata(-coefs, axis=0)
-    ranked_data[coefs<=0] = gene_list_cutoff
-    ranked_data[ranked_data >= gene_list_cutoff] = gene_list_cutoff
-    bg_genes = np.where(ranked_data.min(axis=1) < gene_list_cutoff)[0]
+    top_coefficients_lists = [get_rank_from_coefs(
+        nmf_res.gene_coefs, bg_genes, cutoff) for nmf_res in nmf_results_list]
 
-    a_coefs = get_rank_from_coefs(orig_coefs_a, bg_genes, cutoff)
-    b_coefs = get_rank_from_coefs(orig_coefs_b, bg_genes, cutoff)
-    c_coefs = get_rank_from_coefs(orig_coefs_c, bg_genes, cutoff)
+    for i, coefficients in enumerate(top_coefficients_lists):
+        coefficients.rename(columns={UNASSIGNED_GENES_COLUMN: UNASSIGNED_GENES_COLUMN + f'_{i}'}, inplace=True)
 
     # find the column with the best value per row
-    a_min = a_coefs.idxmin(axis=1)
-    b_min = b_coefs.idxmin(axis=1)
-    c_min = c_coefs.idxmin(axis=1)
+    best_rank_programs_lists = [coefficients.idxmin(axis=1) for coefficients in top_coefficients_lists]
 
-    labels = [*a_coefs.columns, *b_coefs.columns, *c_coefs.columns]
-    source = [] # indices correspond to labels, e.g. A1, A2, A1, B1, ...
+    labels = [column for coefficients in top_coefficients_lists for column in coefficients.columns]
+    source = [] # indices correspond to labels
     target = []
     value = []
     link_colors = []
 
-    # calculate a-b links
-    for i, col_a in enumerate(a_coefs.columns):
-        for j, col_b in enumerate(b_coefs.columns):
-            val = sum((a_min == col_a) & ( b_min == col_b))
-            if val > threshold_counts:
-                source.append(i)
-                target.append(j + a_coefs.shape[1])
-                value.append(val)
-                link_colors.append('lightgrey')
-                if col_a == UNASSIGNED_GENES_COLUMN:
-                    link_colors[-1] = 'lightblue'
-                elif col_b == UNASSIGNED_GENES_COLUMN:
-                    link_colors[-1] = 'lightpink'
-
-    # calculate b-c links
-    for i, col_b in enumerate(b_coefs.columns):
-        for j, col_c in enumerate(c_coefs.columns):
-            val = sum((b_min == col_b) & ( c_min == col_c))
-            if val > threshold_counts:
-                source.append(i + a_coefs.shape[1])
-                target.append(j + a_coefs.shape[1] + b_coefs.shape[1])
-                value.append(val)
-                link_colors.append('lightgrey')
-                if col_b == UNASSIGNED_GENES_COLUMN:
-                    link_colors[-1] = 'lightpink'
-                elif col_c == UNASSIGNED_GENES_COLUMN:
-                    link_colors[-1] = 'lightgreen'
+    # calculate links per pair of programs
+    for k in range(len(nmf_results_list)-1):
+        for i, col_a in enumerate(top_coefficients_lists[k].columns):
+            for j, col_b in enumerate(top_coefficients_lists[k+1].columns):
+                val = sum((best_rank_programs_lists[k] == col_a) & (best_rank_programs_lists[k+1] == col_b))
+                if val > display_threshold_counts:
+                    source.append(i + sum([coefficients.shape[1] for coefficients in top_coefficients_lists[:k]]))
+                    target.append(j + sum([coefficients.shape[1] for coefficients in top_coefficients_lists[:k+1]]))
+                    value.append(val)
+                    link_colors.append('lightgreen')
+                    if col_a == UNASSIGNED_GENES_COLUMN + f'_{k}':
+                        link_colors[-1] = 'lightpink'
+                    elif col_b == UNASSIGNED_GENES_COLUMN + f'_{k+1}':
+                        link_colors[-1] = 'lightsalmon'
 
     fig = go.Figure(data=[go.Sankey(
         node = dict(
@@ -133,7 +112,7 @@ def plot_sankey_for_lung_dev(nmf_res_a, nmf_res_b, nmf_res_c,
 
     fig.update_layout(title_text=f"Sankey Diagram for top {gene_list_cutoff-1} prominent gene coefficients. "
                                  f"Background is {len(bg_genes)} highly ranked genes (top {cutoff-1} per program)"
-                                 f", threshold={threshold_counts}", font_size=10)
+                                 f", threshold={display_threshold_counts}", font_size=10)
     fig.show()
 
 
