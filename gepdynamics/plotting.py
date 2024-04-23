@@ -30,7 +30,7 @@ def get_rank_from_coefs(orig_coefficients, gene_indices, cutoff):
     coefficients = orig_coefficients.iloc[gene_indices].copy()
     tmp_none = 1 - (coefficients==0).all(axis=1).astype(int) # if all prog_names are zero set to 0 else 1
     coefficients.loc[:,:] = rankdata(-coefficients, axis=0)
-    coefficients[UNASSIGNED_GENES_COLUMN] = tmp_none * cutoff
+    coefficients.insert(0, UNASSIGNED_GENES_COLUMN, tmp_none * cutoff)
     coefficients[coefficients > cutoff] = cutoff + 1
 
     return coefficients
@@ -94,10 +94,8 @@ def plot_sankey_for_nmf_results(nmf_results_list: List[NMFResultBase],
                     target.append(j + sum([coefficients.shape[1] for coefficients in top_coefficients_lists[:k+1]]))
                     value.append(val)
                     link_colors.append('lightgreen')
-                    if col_a == UNASSIGNED_GENES_COLUMN + f'_{k}':
-                        link_colors[-1] = 'lightpink'
-                    elif col_b == UNASSIGNED_GENES_COLUMN + f'_{k+1}':
-                        link_colors[-1] = 'lightsalmon'
+                    if (col_a == UNASSIGNED_GENES_COLUMN + f'_{k}') or (col_b == UNASSIGNED_GENES_COLUMN + f'_{k+1}'):
+                        link_colors[-1] = 'lightgrey'
 
     fig = go.Figure(data=[go.Sankey(
         node = dict(
@@ -105,7 +103,7 @@ def plot_sankey_for_nmf_results(nmf_results_list: List[NMFResultBase],
           thickness = 20,
           line = dict(color = "black", width = 0.5),
           label = labels,
-          color = "blue"
+          color = ["blue"] * len(labels)
         ),
         link = dict(
           source = source, target = target, value = value, color=link_colors))])

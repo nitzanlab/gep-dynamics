@@ -122,8 +122,8 @@ res_c = decompositions['P3'][5]
 plotting.plot_sankey_for_nmf_results(
     [decompositions['E12'][5],  decompositions['E15'][5], decompositions['E17'][6], decompositions['P3'][5]],
     gene_list_cutoff=101,
-    cutoff=301, # cutoff for coefficient ranks in comparison
-    display_threshold_counts=40)
+    cutoff=251, # cutoff for coefficient ranks in comparison
+    display_threshold_counts=55)
 
 
 #%%
