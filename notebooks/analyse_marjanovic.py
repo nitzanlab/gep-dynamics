@@ -223,11 +223,6 @@ stats_df.plot(kind='bar', title=f'{column_of_interest} statistics', log=True, yl
 plt.show()
 del column_of_interest, stats_df
 
-<<<<<<< HEAD
-#     tmp.varm['usage_coefs'] = pd.DataFrame(
-#         usage_coefs.T, index=tmp.var.index,
-#         prog_names=[f'{tmp.uns["sname"]}.p{prog}' for prog in range(usages.shape[1])])
-=======
 # %%
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=FutureWarning)
@@ -430,17 +425,21 @@ np.savez(results_dir.joinpath('decompositions.npz'), obj=decompositions)
 column_of_interest = 'timesimple'
 categories = adata.obs[column_of_interest].cat.categories
 
-split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
+color_obs_by = 'clusterK12'
 
-split_adatas = {}
-for cat in categories:
-    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
-    # restoring h5ad trouble saving element
-    tmp.uns['clusterK12_colors_dict'] = dict(zip(tmp.obs['clusterK12'].cat.categories, tmp.uns['clusterK12_colors']))
+if 'split_adatas' not in globals():
+    split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
 
-    split_adatas[cat] = tmp
+    split_adatas = {}
+    for cat in categories:
+        tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
+        # restoring h5ad trouble saving element
+        tmp.uns['clusterK12_colors_dict'] = dict(zip(tmp.obs['clusterK12'].cat.categories, tmp.uns['clusterK12_colors']))
+    
+        split_adatas[cat] = tmp
 
-decompositions = np.load(results_dir.joinpath('decompositions.npz'), allow_pickle=True)['obj'].item()
+if 'decompositions' not in globals():
+    decompositions = np.load(results_dir.joinpath('decompositions.npz'), allow_pickle=True)['obj'].item()
 
 # %% [markdown]
 # ### Examening results
@@ -583,10 +582,17 @@ for cat in categories:
         tmp.obs[field_1].map(tmp.uns[f'{field_1}_colors_dict']),
         ], axis=1)
 
+pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[4,5]]]
+
+
+# %%
+usages
+
 # %%
 # %%time
 
-pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[4,5]]]
+pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[3,6]], categories[[4,5]], categories[[5,6]]]
+pairs.extend((j, i) for i, j in pairs[::-1])
 
 for cat_a, cat_b in pairs:
     print(f'comparing {cat_a} and {cat_b}')
@@ -615,6 +621,9 @@ for cat_a, cat_b in pairs:
         
         # getting cnmf results
         c_object = cnmf.cNMF(cnmf_dir, cat_b)
+
+        if not hasattr(c_object, 'X'):
+            c_object.X = cnmf.load_data_from_npz(c_object.paths['data'])
         
         threshold = adata_b.uns['cnmf_params']['threshold']
         for k in range(cmp.rank_b, cmp.rank_b + cmp.max_added_rank + 1):
@@ -674,8 +683,12 @@ for cat_a, cat_b in pairs:
     
 
 
-
 # %%
+marker_genes_symbols = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a1", "Rsph1", "Foxj1",
+               "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
+               "Mki67", "Cdkn3", "Rrm2", "Lig1"]
+
+marker_genes_ID = adata.var[adata.var.geneSymbol.isin(marker_genes_symbols)].index
 
 for cat_a, cat_b in pairs:
     print(f'comparing {cat_a} and {cat_b}')
@@ -687,10 +700,8 @@ for cat_a, cat_b in pairs:
         f"comparator_{adata_a.uns['sname']}_{adata_b.uns['sname']}"))
     
     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    
+    cmp.plot_marker_genes_heatmaps(marker_genes_ID, marker_genes_symbols)
 
-    marker_genes = ['Krt8', 'Hopx', 'Klf6', 'Aqp5', 'Sftpa1', 'Sftpb', 'Sftpc',
-                'Mki67', 'Top2a', 'Rrm1', 'Rrm2',
-                'Sox2', 'Scgb3a2', 'Foxj1', 'Dynlrb2', 'Hoxa5', 'Col5a2', ]
-    
-    cmp.plot_marker_genes_heatmaps(marker_genes)
-    
+
+# %%

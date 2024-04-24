@@ -565,6 +565,18 @@ with warnings.catch_warnings():  # supress scanpy plotting warning
 subset.shape
 
 # %%
+# Cell Cycle status
+tmp = sc.read_h5ad(results_dir.joinpath("epi_subset.h5ad"))
+sc.pp.normalize_total(tmp, target_sum=5e3, exclude_highly_expressed=True)
+sc.pp.log1p(tmp)
+with warnings.catch_warnings():  # supress plotting warnings
+    warnings.simplefilter(action='ignore', category=UserWarning)
+    sc.pl.stacked_violin(tmp, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2', 'Lig1'], groupby='development_stage')
+
+del tmp
+pd.crosstab(tmp.obs.Phase, tmp.obs.development_stage)
+
+# %%
 # %%time
 
 categories = subset.obs[column_of_interest].cat.categories
@@ -1040,5 +1052,3 @@ for cat_a, cat_b in pairs:
         cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
         print(cmp)
 
-
-# %%
