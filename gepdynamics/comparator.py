@@ -29,7 +29,7 @@ import numbers
 import typing
 
 from copy import copy
-from typing import Tuple, Dict, Any, List, Union
+from typing import Tuple, Dict, Any, List, Union, Optional
 
 import numpy as np
 import pandas as pd
@@ -1510,6 +1510,7 @@ class Comparator(object):
             plt.close()
 
     def plot_marker_genes_heatmaps(self, marker_genes: List[str],
+                                   marker_gene_names: Optional[List[str]] = None,
                                    show: bool = False, save: bool = True):
         """
         Plot heatmaps of the marker genes coefficients for each decomposition
@@ -1517,8 +1518,11 @@ class Comparator(object):
         dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
 
         for res in [self.a_result, *self._all_results]:
-            sns.heatmap(res.gene_coefs.loc[marker_genes].T,
-                        cmap='coolwarm', vmin=-2, vmax=2)
+            heatmap_data = res.gene_coefs.loc[marker_genes].T
+            sns.heatmap(heatmap_data, cmap='coolwarm', vmin=-2, vmax=2)
+
+            if marker_gene_names is not None:
+                plt.xticks(0.5 + np.arange(len(marker_gene_names)), marker_gene_names)
 
             plt.title(f'Marker genes coefficients for {res.name}')
             plt.tight_layout()
