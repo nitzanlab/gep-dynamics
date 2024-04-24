@@ -15,7 +15,6 @@ from scipy.stats import rankdata
 from scipy.cluster import hierarchy
 
 import gepdynamics._utils as _utils
-from gepdynamics.comparator import NMFResultBase
 
 pio.renderers.default = 'browser'
 # pio.renderers.default = 'svg'
@@ -36,7 +35,7 @@ def get_rank_from_coefs(orig_coefficients, gene_indices, cutoff):
     return coefficients
 
 
-def calculate_background_genes(nmf_results_list: List[NMFResultBase],
+def calculate_background_genes(nmf_results_list: List['NMFResultBase'],
                                  gene_list_cutoff=401):
     """
     Calculate the background genes for joint best rank metric
@@ -52,7 +51,7 @@ def calculate_background_genes(nmf_results_list: List[NMFResultBase],
     return bg_genes
 
 
-def plot_sankey_for_nmf_results(nmf_results_list: List[NMFResultBase],
+def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
                                 gene_list_cutoff=401,
                                 cutoff=801, # cutoff for coefficient ranks in comparison
                                 display_threshold_counts=100):
