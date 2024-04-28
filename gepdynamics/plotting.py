@@ -83,7 +83,7 @@ def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
     value = []
     link_colors = []
 
-    # calculate links per pair of programs
+    # calculate links for each pair of programs from adjacent points
     for k in range(len(nmf_results_list)-1):
         for i, col_a in enumerate(top_coefficients_lists[k].columns):
             for j, col_b in enumerate(top_coefficients_lists[k+1].columns):
@@ -93,8 +93,16 @@ def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
                     target.append(j + sum([coefficients.shape[1] for coefficients in top_coefficients_lists[:k+1]]))
                     value.append(val)
                     link_colors.append('lightgreen')
-                    if (col_a == UNASSIGNED_GENES_COLUMN + f'_{k}') or (col_b == UNASSIGNED_GENES_COLUMN + f'_{k+1}'):
+                    if col_a.startswith(UNASSIGNED_GENES_COLUMN) or col_b.startswith(UNASSIGNED_GENES_COLUMN):
                         link_colors[-1] = 'lightgrey'
+
+    # create a list of node colors that is blue for all except unassigned genes
+    node_colors = []
+    for i, label in enumerate(labels):
+        if label.startswith(UNASSIGNED_GENES_COLUMN):
+            node_colors.append('gray')
+        else:
+            node_colors.append('blue')
 
     fig = go.Figure(data=[go.Sankey(
         node = dict(
@@ -102,7 +110,7 @@ def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
           thickness = 20,
           line = dict(color = "black", width = 0.5),
           label = labels,
-          color = ["blue"] * len(labels)
+          color = node_colors
         ),
         link = dict(
           source = source, target = target, value = value, color=link_colors))])

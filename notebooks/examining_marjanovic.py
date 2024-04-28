@@ -45,79 +45,28 @@ print(os.getcwd())
 # %%
 
 results_dir = _utils.set_dir('results')
-zepp_results_dir = _utils.set_dir(results_dir.joinpath('zepp'))
+marjanovic_results_dir = _utils.set_dir(results_dir.joinpath('marjanovic'))
 
-decompositions = np.load(zepp_results_dir.joinpath('decompositions.npz'), allow_pickle=True)['obj'].item()
+decompositions = np.load(marjanovic_results_dir.joinpath('decompositions.npz'), allow_pickle=True)['obj'].item()
 
-stages = ['E12', 'E15', 'E17', 'P3', 'P7']
-pairs = [(stages[i], stages[i + 1]) for i in range(len(stages) -1)]
+adata = sc.read_h5ad(results_dir.joinpath('marjanovic', 'full.h5ad'))
 
-# %%
-
-stage_a, stage_b = stages[:2]
-
-comparison_dir = zepp_results_dir.joinpath(f"comparator_{stage_a}_{stage_b}")
-
-adata_a = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"{stage_a}.h5ad"))
-adata_b = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"{stage_b}.h5ad"))
-
-# adding row colors
-for tmp in [adata_a, adata_b]:
-    tmp.obsm['row_colors'] = pd.concat([
-        tmp.obs['celltype'].map(tmp.uns['celltype_colors_dict']),
-        ], axis=1)
-
-cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
-print(cmp)
-cmp.print_errors()
-
-# cmp.examine_adata_a_decomposition_on_jointly_hvgs(35, 3500)
-# cmp.examine_adata_b_decompositions(3500, 35, 3500)
-# cmp.plot_usages_violin('celltype', show=False)
-
+column_of_interest = 'timesimple'
+categories = adata.obs[column_of_interest].cat.categories
 
 # %%
-
-for stage_a, stage_b in pairs:
-    comparison_dir = zepp_results_dir.joinpath(f"comparator_{stage_a}_{stage_b}")
-
-    adata_a = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"{stage_a}.h5ad"))
-    adata_b = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"{stage_b}.h5ad"))
-
-    # adding row colors
-    for tmp in [adata_a, adata_b]:
-        tmp.obsm['row_colors'] = pd.concat([
-            tmp.obs['celltype'].map(tmp.uns['celltype_colors_dict']),
-            ], axis=1)
-
-    cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
-    print(cmp)
-
-    # Where the work is done
-    cmp.print_errors()
-
-
-    # Close the loop
-    del adata_a, adata_b
-
-
-#%%
 
 reload(plotting)
 
 plotting.pio.renderers.default = 'browser'
 # plotting.pio.renderers.default = 'svg'
 
-res_a = decompositions['E12'][5]
-res_b = decompositions['E15'][6]
-res_c = decompositions['E17'][6]
-
-res_a = decompositions['E15'][5]
-res_b = decompositions['E17'][6]
-res_c = decompositions['P3'][5]
-
-plotting.plot_sankey_for_nmf_results(
-    [decompositions['E12'][5],  decompositions['E15'][5], decompositions['E17'][6], decompositions['P3'][5]],
+plotting.plot_sankey_for_nmf_results([
+    decompositions['04_K_12w_ND'][4],
+    decompositions['05_K_30w_ND'][4],
+    decompositions['06_KP_12w_ND'][5],
+    decompositions['07_KP_20w_ND'][5],
+    decompositions['08_KP_30w_ND'][5]],
     gene_list_cutoff=101,
     cutoff=251, # cutoff for coefficient ranks in comparison
     display_threshold_counts=55)
@@ -126,20 +75,17 @@ plotting.plot_sankey_for_nmf_results(
 
 #%%
 
-subset = sc.read_h5ad(zepp_results_dir.joinpath("epi_subset.h5ad"))
-sc.pp.normalize_total(subset, target_sum=5e3, exclude_highly_expressed=True)
-sc.pp.log1p(subset)
-print(subset)
-
-#catch user warnings
-import warnings
+adata.raw = adata
+sc.pp.normalize_total(adata, target_sum=1e6, exclude_highly_expressed=True)
+sc.pp.log1p(adata)
 
 #%%
+cc_gene_symbles = ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2', 'Lig1']
+cc_gene_id = adata.var_names[adata.var.geneSymbol.isin(cc_gene_symbles)]
 
-
-sc.pl.violin(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2', 'Lig1'])
-sc.pl.stacked_violin(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2'], groupby='development_stage')
-sc.pl.dotplot(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2'], groupby='development_stage')
+sc.pl.violin(adata, cc_gene_id)
+sc.pl.stacked_violin(adata, cc_gene_id, groupby='timesimple')
+sc.pl.dotplot(adata, cc_gene_id, groupby='timesimple')
 
 # df = subset.obs.loc[:, ['S.Score', 'G2M.Score', 'Phase']]
 
