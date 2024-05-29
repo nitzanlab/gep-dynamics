@@ -122,6 +122,20 @@ plotting.plot_sankey_for_nmf_results(
     cutoff=251, # cutoff for coefficient ranks in comparison
     display_threshold_counts=55)
 
+#%% comparing programs pairs
+reload(comparator)
+
+# create an instance of my gprofiler object for mus-musculus:
+gp = _utils.MyGProfiler(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG'])
+
+res_a = decompositions['E12'][5]
+res_b = decompositions['E15'][5]
+index_a = 4
+index_b = 4
+
+comparator.compare_programs(res_a, index_a, res_b, index_b,
+                            zepp_results_dir.joinpath('programs_comparisons'),
+                            gp=gp)
 
 
 #%%
