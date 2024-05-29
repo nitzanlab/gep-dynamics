@@ -673,6 +673,8 @@ for cat in categories:
 # %%
 column_of_interest = 'development_stage'
 color_obs_by = 'celltype'
+cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
+
 
 if 'subset' not in globals():
     subset_adata_file = results_dir.joinpath('epi_subset.h5ad')
