@@ -29,7 +29,7 @@ import numbers
 import typing
 
 from copy import copy
-from typing import Tuple, Dict, Any, List, Union, Optional
+from typing import Tuple, Dict, Any, List, Union, Optional, Iterable
 
 import numpy as np
 import pandas as pd
@@ -102,7 +102,7 @@ class NMFResultBase(object):
                                  save: bool = True, show: bool = False)
         Plots and optionally saves a histogram of the loss per cell distribution.
 
-    plot_correlations_heatmaps(self, tsc_truncation_level: int = 1000,
+    plot_correlations_heatmaps(self, tsc_truncation_level: int = 500,
                                saving_folder: _utils.PathLike = None,
                                save: bool = True, show: bool = False):
         Plots heatmaps for the usage and gene coefficients correlations.
@@ -269,7 +269,7 @@ class NMFResultBase(object):
             plt.show()
         plt.close()
 
-    def plot_correlations_heatmaps(self, tsc_truncation_level: int = 1000,
+    def plot_correlations_heatmaps(self, tsc_truncation_level: int = 500,
                                    saving_folder: _utils.PathLike = None,
                                    save: bool = True, show: bool = False):
         """
@@ -283,7 +283,7 @@ class NMFResultBase(object):
         ----------
         tsc_truncation_level : int, optional
             Number of top ranked genes for the truncated spearman correlation
-            of the gene coefficients (default is 1000).
+            of the gene coefficients (default is 500).
         saving_folder : _utils.PathLike, optional
             Path to the folder where the plots will be saved (default is None).
         save : bool, optional
@@ -1465,7 +1465,7 @@ class Comparator(object):
     def plot_correlations_flow_chart(self, results: List['NMFResultBase'],
                                      usage_corr_threshold: float = 0.3,
                                      tsc_threshold: float = 0.3,
-                                     tsc_truncation_level: int = 1000,
+                                     tsc_truncation_level: int = 500,
                                      show: bool = False, save: bool = True):
         """
         Plot a flow chart of the correlations between the decompositions
@@ -1533,7 +1533,7 @@ class Comparator(object):
                 plt.show()
             plt.close()
 
-    def run_gsea(self, n_top_genes: int = 1000, gprofiler_kwargs: Dict[str, Any] = None,
+    def run_gsea(self, n_top_genes: int = 500, gprofiler_kwargs: Dict[str, Any] = None,
                  gene_ids_column_number: int = 0):
         """
         Run gene set enrichment analysis on all the decomposed GEPs
@@ -1541,7 +1541,7 @@ class Comparator(object):
         Parameters:
         ----------
         n_top_genes : int, optional
-            Number of top-ranked genes to consider for ranked GSEA (default is 1000).
+            Number of top-ranked genes to consider for ranked GSEA (default is 500).
         gprofiler_kwargs : Dict[str, Any], optional
             Additional keyword arguments to be passed to `MyGProfiler` class (default is None).
         gene_ids_column_number : int, optional
@@ -1560,6 +1560,8 @@ class Comparator(object):
 
         for res in [self.a_result, *self._all_results]:
             top_genes_df = res.get_top_genes(n_top_genes)
+            top_genes_df = top_genes_df.applymap(
+                lambda index: self.adata_a.var.loc[index, gene_IDs_column_name])
             top_genes_df.to_csv(programs_top_genes_dir.joinpath(f'{res.name}_top_genes.csv'))
 
         if gprofiler_kwargs is None:
@@ -1585,7 +1587,7 @@ class Comparator(object):
 
     def _run_gsea_on_nmf_result(
             self, res: NMFResultBase, background_gene_ids: List[str],
-            gp: _utils.MyGProfiler, adata_var: pd.DataFrame, n_top_genes: int = 1000,
+            gp: _utils.MyGProfiler, adata_var: pd.DataFrame, n_top_genes: int = 500,
             gene_ids_column_name: str = 'name'):
         """
         Run gene set enrichment analysis on a specific NMF result.
@@ -1601,7 +1603,7 @@ class Comparator(object):
         adata_var : pd.DataFrame
             AnnData object var attribute.
         n_top_genes : int, optional
-            Number of top-ranked genes to consider for ranked GSEA (default is 1000).
+            Number of top-ranked genes to consider for ranked GSEA (default is 500).
         gene_ids_column_name : str, optional
             Column name in `adata_var` representing gene IDs (default is 'name').
 
@@ -1627,7 +1629,7 @@ class Comparator(object):
             res.gsea_results[index].to_csv(
                 gsea_dir.joinpath(f"{res.prog_names[index]}.csv"))
 
-    def calculate_fingerprints(self, truncation_level: int = 1000):
+    def calculate_fingerprints(self, truncation_level: int = 500):
         """
         # ToDo: plot fingerprints as heatmaps (currently using csv to excel)
 
@@ -1671,7 +1673,7 @@ class Comparator(object):
         excel_template.save(xlsx_path)
         excel_template.close()
 
-    def _calculate_gene_coefs_tsc_a_denovo(self, truncation_level: int = 1000):
+    def _calculate_gene_coefs_tsc_a_denovo(self, truncation_level: int = 500):
         """
         Calculate the TSC between the gene coefs of timepoint A and de-novo coefs
         """
@@ -1698,7 +1700,7 @@ class Comparator(object):
 
         return df
 
-    def _calculate_gene_coefs_tsc_a_pfnmf(self, truncation_level: int = 1000):
+    def _calculate_gene_coefs_tsc_a_pfnmf(self, truncation_level: int = 500):
         """
         Calculate the TSC between the gene coefs of timepoint A and f/pfNMF coefs
         """
@@ -1711,7 +1713,7 @@ class Comparator(object):
 
         return output
 
-    def _calculate_corr_denovo_pfnmf(self, truncation_level: int = 1000):
+    def _calculate_corr_denovo_pfnmf(self, truncation_level: int = 500):
         """
         Calculate the comparisons between de-novo and f/pfNMF GEPs.
         Performs GEP usages correlation  and TSC on the gene coefficients
@@ -1769,4 +1771,132 @@ class Comparator(object):
             rank=W.shape[1],
             W=W,
             H=H)
+
+
+def compare_programs(res_a: NMFResultBase, index_a: int, res_b: NMFResultBase,
+                     index_b: int, save_dir: _utils.PathLike,
+                     top_genes: int = 500,
+                     genes_symbols: Iterable[str] = None,
+                     gp: _utils.MyGProfiler = None,
+                     show_plot: bool = False):
+    """
+    Compare a pair of programs between two NMF results.
+
+    Parameters
+    ----------
+    res_a : NMFResultBase
+        First NMF result object containing gene coefficients and program names.
+    index_a : int
+        Index of the program in the first NMF result.
+    res_b : NMFResultBase
+        Second NMF result object containing gene coefficients and program names.
+    index_b : int
+        Index of the program in the second NMF result.
+    save_dir : _utils.PathLike
+        Directory where figures and files will be saved.
+    top_genes : int, optional
+        Number of top genes to consider per program (default is 500).
+    genes_symbols : Iterable[str], optional
+        List of gene symbols matching the genes in the results. If None, the
+        index of the results objects is taken to be symbols (default is None).
+    gp : _utils.MyGProfiler, optional
+        Instance of `MyGProfiler` class for Gene Set Enrichment Analysis (default is None).
+    show_plot : bool, optional
+        If True, displays the plot. Otherwise, only save the plot to `save_dir`
+        (default is False).
+
+    Returns
+    -------
+    None
+        Saves the scatter plot and ordered gene lists to `save_dir`. Optionally
+        performs GSEA and saves the results.
+
+    Notes
+    -----
+    This function compares gene programs between two NMF results by examining
+    the top genes in each program. It calculates Pearson and truncated
+    Spearman's correlations, generates a scatter plot of gene coefficients,
+    and optionally performs GSEA.
+    """
+    save_dir = _utils.set_dir(save_dir)
+    prefix = f'{res_a.prog_names[index_a]}_vs_{res_b.prog_names[index_b]}'
+
+    coefs_a = res_a.gene_coefs[res_a.prog_names[index_a]].copy()
+    coefs_b = res_b.gene_coefs[res_b.prog_names[index_b]].copy()
+
+    # Set negative values to zero
+    coefs_a[coefs_a < 0] = 0
+    coefs_b[coefs_b < 0] = 0
+
+    # create True - False vector if gene is in the top genes
+    top_a = coefs_a > coefs_a.quantile(1 - top_genes / coefs_a.shape[0])
+    top_b = coefs_b > coefs_b.quantile(1 - top_genes / coefs_b.shape[0])
+
+    insignificant = ~top_a & ~top_b
+    shared = top_a & top_b
+    unique_a = top_a & ~top_b
+    unique_b = ~top_a & top_b
+
+    pearson_correlation = np.corrcoef(coefs_a, coefs_b)[0, 1]
+    tsc = _utils.truncated_spearmans_correlation(
+        pd.concat([coefs_a, coefs_b], axis=1), truncation_level=500,
+        rowvar=False)[0, 1]
+
+    # scatter plot of the genes coefficients
+    plt.scatter(coefs_a[insignificant], coefs_b[insignificant], s=2, label='Insignificant')
+    plt.scatter(coefs_a[shared], coefs_b[shared], s=2, label='Shared top genes')
+    plt.scatter(coefs_a[unique_a], coefs_b[unique_a], s=2, label='Unique top genes in A')
+    plt.scatter(coefs_a[unique_b], coefs_b[unique_b], s=2, label='Unique top genes in B')
+
+    plt.title(f'Gene coefficients of {res_a.prog_names[index_a]} and '
+              f'{res_b.prog_names[index_b]}, r={pearson_correlation:.2f}, '
+              f'tsc={tsc:.2f}')
+
+    plt.xlabel(f'{res_a.prog_names[index_a]}')
+    plt.ylabel(f'{res_b.prog_names[index_b]}')
+
+    plt.legend()
+    plt.savefig(save_dir.joinpath(f'{prefix}_coefs_scatter.png'))
+
+    if show_plot:
+        plt.show()
+    plt.close()
+
+    # Make sure the index of coefs_a and coefs_b is the gene symbols
+    if genes_symbols is not None:
+        genes_symbols = pd.Index(genes_symbols)
+        coefs_a.index = genes_symbols
+        coefs_b.index = genes_symbols
+        shared.index = genes_symbols
+        unique_a.index = genes_symbols
+        unique_b.index = genes_symbols
+    else:
+        genes_symbols = coefs_a.index
+
+    # order the genes lists
+    ordered_shared = (coefs_a[shared] * coefs_b[shared]).sort_values(
+        ascending=False).index
+    ordered_unique_a = coefs_a[unique_a].sort_values(ascending=False).index
+    ordered_unique_b = coefs_b[unique_b].sort_values(ascending=False).index
+
+    # save the ordered gene lists to a file
+    pd.DataFrame({
+        'shared': pd.Series(ordered_shared),
+        'unique_a': pd.Series(ordered_unique_a),
+        'unique_b': pd.Series(ordered_unique_b)}
+    ).to_csv(save_dir.joinpath(f'{prefix}_ordered_genes.csv'), index=False)
+
+    if gp is not None:
+        # perform GSEA and save results:
+        background_genes = genes_symbols.to_list()
+
+        gp.profile(ordered_shared.to_list(), ordered=True, background=background_genes
+                   ).to_csv(save_dir.joinpath(f'{prefix}_shared_genes_gsea.csv'))
+        gp.profile(ordered_unique_a.to_list(), ordered=True, background=background_genes
+                   ).to_csv(save_dir.joinpath(f'{prefix}_unique_a_genes_gsea.csv'))
+        gp.profile(ordered_unique_b.to_list(), ordered=True, background=background_genes
+                   ).to_csv(save_dir.joinpath(f'{prefix}_unique_b_genes_gsea.csv'))
+
+
+
 

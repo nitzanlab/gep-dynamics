@@ -103,9 +103,6 @@ for stage_a, stage_b in pairs:
 
 #%%
 
-
-#%%
-
 reload(plotting)
 
 plotting.pio.renderers.default = 'browser'
@@ -125,16 +122,40 @@ plotting.plot_sankey_for_nmf_results(
     cutoff=251, # cutoff for coefficient ranks in comparison
     display_threshold_counts=55)
 
+#%% comparing programs pairs
+reload(comparator)
+
+# create an instance of my gprofiler object for mus-musculus:
+gp = _utils.MyGProfiler(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG'])
+
+res_a = decompositions['E12'][5]
+res_b = decompositions['E15'][5]
+index_a = 4
+index_b = 4
+
+comparator.compare_programs(res_a, index_a, res_b, index_b,
+                            zepp_results_dir.joinpath('programs_comparisons'),
+                            gp=gp)
+
 
 #%%
 
-import plotly.graph_objects as go
-import plotly.io as pio
-pio.renderers.default='svg'
-pio.renderers.default='browser'
+subset = sc.read_h5ad(zepp_results_dir.joinpath("epi_subset.h5ad"))
+sc.pp.normalize_total(subset, target_sum=5e3, exclude_highly_expressed=True)
+sc.pp.log1p(subset)
+print(subset)
 
-adata_c = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"E17.h5ad"))
+#catch user warnings
+import warnings
 
+#%%
+
+
+sc.pl.violin(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2', 'Lig1'])
+sc.pl.stacked_violin(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2'], groupby='development_stage')
+sc.pl.dotplot(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2'], groupby='development_stage')
+
+# df = subset.obs.loc[:, ['S.Score', 'G2M.Score', 'Phase']]
 
 #%% Club
 

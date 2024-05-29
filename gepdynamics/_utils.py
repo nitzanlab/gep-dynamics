@@ -68,39 +68,39 @@ def project_simplex_points(points: np.ndarray) -> np.ndarray:
     return (points - center) @ rotation_matrix.T
 
 
-def truncated_spearmans_correlation(data, truncation_level: int = 1000,
+def truncated_spearmans_correlation(data, truncation_level: int = 500,
                                     smaller_is_better: bool = False, rowvar: bool = True):
     """
+    Compute the truncated Spearman's correlation matrix for the given data.
 
     Parameters
     ----------
     data : array_like
-        Input data array.
+        Input data array with variables as rows (default) or columns.
     truncation_level : int, optional
-        Maximum value allowed after truncation (default is 1000).
+        Maximum rank value after truncation (default is 500).
     smaller_is_better : bool, optional
-        Specifies whether smaller values are considered better (default is False).
+        If True, reverses data values to treat smaller values as better
+        (default is False).
     rowvar : bool, optional
-        Determines whether the row correlation is calculated (True) or the column correlation (False)
+        If True, rows represent variables; if False, columns represent variables
         (default is True).
 
     Returns
     -------
     correlation : ndarray
-        The truncated Spearman's correlation matrix.
+        The truncated Spearman's correlation matrix, showing pairwise
+        correlations between variables.
 
     Notes
     -----
-    The truncated Spearman's correlation is calculated by first ranking the data.
-    Ranks larger than the truncation level are set to the truncation level before
-    calculating the correlation matrix.
+    Data is ranked, truncated at the specified level, and then the correlation
+    matrix is computed. This method mitigates the influence of extreme values.
     """
     if rowvar:  # transpose the data if the row correlation is desired
         data = data.T
-    if smaller_is_better: # reverse the data if smaller values are considered better
+    if not smaller_is_better: # reverse data if larger values are considered better
         data = -data
-
-    n_rows, n_cols = data.shape
 
     ranked_data = rankdata(data, axis=0)
     ranked_data[ranked_data > truncation_level] = truncation_level
