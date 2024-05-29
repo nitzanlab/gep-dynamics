@@ -586,9 +586,6 @@ pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,
 
 
 # %%
-usages
-
-# %%
 # %%time
 
 pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[3,6]], categories[[4,5]], categories[[5,6]]]
@@ -672,7 +669,7 @@ for cat_a, cat_b in pairs:
     cmp.calculate_fingerprints()
     
     print('running GSEA')
-    cmp.run_gsea(gene_ids_column_number=1, 
+    cmp.run_gsea(gene_ids_column_number=2, 
                  gprofiler_kwargs=dict(organism='mmusculus',
                                        sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
 
@@ -705,3 +702,22 @@ for cat_a, cat_b in pairs:
 
 
 # %%
+
+pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[3,6]], categories[[4,5]], categories[[5,6]]]
+pairs.extend((j, i) for i, j in pairs[::-1])
+
+for cat_a, cat_b in pairs:
+    print(f'comparing {cat_a} and {cat_b}')
+    
+    adata_a = split_adatas[cat_a]
+    adata_b = split_adatas[cat_b]
+    
+    comparison_dir = _utils.set_dir(results_dir.joinpath(
+        f"comparator_{adata_a.uns['sname']}_{adata_b.uns['sname']}"))
+    
+    cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
+    
+    print('running GSEA')
+    cmp.run_gsea(gene_ids_column_number=2, 
+                 gprofiler_kwargs=dict(organism='mmusculus',
+                                       sources=['GO:BP', 'WP', 'REAC', 'KEGG']))

@@ -539,11 +539,26 @@ if not subset_adata_file.exists():
     
     _utils.joint_hvg_across_stages(subset, obs_category_key=column_of_interest, n_top_genes=5000)
 
+    # Generate new UMAP for remaining cells using BBKNN
+    tmp = subset.copy()
+    sc.pp.normalize_total(tmp, target_sum=5e3, exclude_highly_expressed=True)
+    sc.pp.log1p(tmp)
+    tmp.var['highly_variable'] = tmp.var['joint_highly_variable']
+    sc.pp.pca(tmp, use_highly_variable=True)
+
+    sc.external.pp.bbknn(tmp, batch_key="development_stage")
+    sc.tl.umap(tmp)
+
+    subset.obsm['X_umap'] = tmp.obsm['X_umap'].copy()
+    subset.obsp['connectivities'] = tmp.obsp['connectivities'].copy()
+    subset.obsp['distances'] = tmp.obsp['distances'].copy()
+    subset.uns['neighbors'] = tmp.uns['neighbors']
+    
     subset.write(subset_adata_file)
 else:
     subset = sc.read_h5ad(subset_adata_file)
 
-
+# %%
 with warnings.catch_warnings():  # supress scanpy plotting warning
     warnings.simplefilter(action='ignore', category=UserWarning)
     
@@ -574,7 +589,7 @@ with warnings.catch_warnings():  # supress plotting warnings
     sc.pl.stacked_violin(tmp, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2', 'Lig1'], groupby='development_stage')
 
 del tmp
-pd.crosstab(tmp.obs.Phase, tmp.obs.development_stage)
+pd.crosstab(subset.obs.Phase, subset.obs.development_stage)
 
 # %%
 # %%time
@@ -738,7 +753,7 @@ np.savez(results_dir.joinpath('decompositions.npz'), obj=decompositions)
 decomposition_images = _utils.set_dir(split_adatas_dir.joinpath("decompositions"))
 
 tsc_threshold: float = 0.35
-tsc_truncation_level: int = 1000
+tsc_truncation_level: int = 500
 
 for cat in categories:
     results = [decompositions[cat][i] for i in range(k_min, k_max + 1)]
