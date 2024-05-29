@@ -29,7 +29,7 @@ import numbers
 import typing
 
 from copy import copy
-from typing import Tuple, Dict, Any, List, Union, Optional
+from typing import Tuple, Dict, Any, List, Union, Optional, Iterable
 
 import numpy as np
 import pandas as pd
@@ -1560,6 +1560,8 @@ class Comparator(object):
 
         for res in [self.a_result, *self._all_results]:
             top_genes_df = res.get_top_genes(n_top_genes)
+            top_genes_df = top_genes_df.applymap(
+                lambda index: self.adata_a.var.loc[index, gene_IDs_column_name])
             top_genes_df.to_csv(programs_top_genes_dir.joinpath(f'{res.name}_top_genes.csv'))
 
         if gprofiler_kwargs is None:
@@ -1769,4 +1771,83 @@ class Comparator(object):
             rank=W.shape[1],
             W=W,
             H=H)
+
+
+# Comparing a pair of programs between two NMF results, dividing the genes of
+# each, creating categories for unique and shared top genes
+def compare_programs(res_a: NMFResultBase, index_a: int, res_b: NMFResultBase,
+                     index_b: int, top_genes: int = 500,
+                     genes_symbols: Iterable[str] = None,
+                     gp: _utils.MyGProfiler = None,
+                     show: bool = False, save_path: _utils.PathLike = None):
+    """
+    Compare a pair of programs between two NMF results.
+
+    Parameters
+    ----------
+    res_a : NMFResultBase
+        First NMF result object.
+    index_a : int
+        Index of the program in the first NMF result.
+    res_b : NMFResultBase
+        Second NMF result object.
+    index_b : int
+        Index of the program in the second NMF result.
+    top_genes : int, optional
+        Number of top genes to consider for comparison (default is 500).
+    genes_symbols : Iterable[str], optional
+        List of gene symbols matching the genes in the results objects. If None,
+        the index of the results objects is taken to be symbles (default is None).
+    gp : _utils.MyGProfiler, optional
+        Instance of `MyGProfiler` class for GSEA (default is None).
+    show : bool, optional
+        If True, the plot will be displayed (default is False).
+    save_path : _utils.PathLike, optional
+        If supplied, the figure will be saved at this location (default is None).
+    """
+
+    coefs_a = res_a.gene_coefs[res_a.prog_names[index_a]].copy()
+    coefs_b = res_b.gene_coefs[res_b.prog_names[index_b]].copy()
+
+    # Set negative values to zero
+    coefs_a[coefs_a < 0] = 0
+    coefs_b[coefs_b < 0] = 0
+
+    # create True - False vector if gene is in the top genes
+    top_a = coefs_a > coefs_a.quantile(1 - top_genes / coefs_a.shape[0])
+    top_b = coefs_b > coefs_b.quantile(1 - top_genes / coefs_b.shape[0])
+
+    if show or (save_path is not None):
+        # scatter plot of the genes, according to the cross product of the top genes
+        # in each program
+        mask = ~top_a & ~top_b
+        plt.scatter(coefs_a[mask], coefs_b[mask], s=2, label='Not unique genes')
+        mask = top_a & top_b
+        plt.scatter(coefs_a[mask], coefs_b[mask], s=2, label='Shared top genes')
+        mask = top_a & ~top_b
+        plt.scatter(coefs_a[mask], coefs_b[mask], s=2, label='Unique top genes in A')
+        mask = ~top_a & top_b
+        plt.scatter(coefs_a[mask], coefs_b[mask], s=2, label='Unique top genes in B')
+
+        pearson_correlation = np.corrcoef(coefs_a, coefs_b)[0, 1]
+        tsc = _utils.truncated_spearmans_correlation(
+            pd.concat([coefs_a, coefs_b], axis=1), truncation_level=1000, rowvar=False)[0, 1]
+
+        plt.title(f'Gene coefficients of {res_a.prog_names[index_a]} and '
+                  f'{res_b.prog_names[index_b]}, r={pearson_correlation:.2f}')
+
+        plt.xlabel(f'{res_a.prog_names[index_a]}')
+        plt.ylabel(f'{res_b.prog_names[index_b]}')
+
+        plt.legend()
+
+        if save_path is not None:
+            plt.savefig(save_path)
+        if show:
+            plt.show()
+
+
+
+
+
 

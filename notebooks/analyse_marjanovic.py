@@ -688,7 +688,7 @@ marker_genes_symbols = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a1", "Rsph1", "Foxj1",
                "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
                "Mki67", "Cdkn3", "Rrm2", "Lig1"]
 
-marker_genes_ID = adata.var[adata.var.geneSymbol.isin(marker_genes_symbols)].index
+marker_genes_ID = [adata.var.index[adata.var['geneSymbol'] == gene].tolist()[0] for gene in marker_genes_symbols]
 
 for cat_a, cat_b in pairs:
     print(f'comparing {cat_a} and {cat_b}')
@@ -702,6 +702,6 @@ for cat_a, cat_b in pairs:
     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
     
     cmp.plot_marker_genes_heatmaps(marker_genes_ID, marker_genes_symbols)
-
+    break
 
 # %%
