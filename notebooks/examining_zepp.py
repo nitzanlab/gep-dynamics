@@ -123,20 +123,52 @@ plotting.plot_sankey_for_nmf_results(
     display_threshold_counts=55)
 
 #%% comparing programs pairs
+from copy import copy
 reload(comparator)
+
+comparison_dir = zepp_results_dir.joinpath('programs_comparisons')
 
 # create an instance of my gprofiler object for mus-musculus:
 gp = _utils.MyGProfiler(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG'])
 
-res_a = decompositions['E12'][5]
-res_b = decompositions['E15'][5]
-index_a = 4
-index_b = 4
+#%% E12 vs E15
 
-comparator.compare_programs(res_a, index_a, res_b, index_b,
-                            zepp_results_dir.joinpath('programs_comparisons'),
-                            gp=gp)
+res_a = copy(decompositions['E12'][5])
+res_a.prog_names = ['E12_Mphase', 'E12_Club', 'E12_Alveolar', 'E12_AT2', 'E12_Sphase']
+res_a.gene_coefs.columns = res_a.prog_names
 
+res_b = copy(decompositions['E15'][5])
+res_b.prog_names = ['E15_Club', 'E15_AT1', 'E15_AT2', 'E15_Mphase', 'E15_Sphase']
+res_b.gene_coefs.columns = res_b.prog_names
+
+for index_a, index_b in [(0,3), (4,4), (1,0), (1,1), (2,1), (2,2), (3,2)]:
+    comparator.compare_programs(res_a, index_a, res_b, index_b, comparison_dir, gp=gp)
+
+#%% E15 vs E17
+
+res_a = copy(decompositions['E15'][5])
+res_a.prog_names = ['E15_Club', 'E15_AT1', 'E15_AT2', 'E15_Mphase', 'E15_Sphase']
+res_a.gene_coefs.columns = res_a.prog_names
+
+res_b = copy(decompositions['E17'][6])
+res_b.prog_names = ['E17_AT2', 'E17_AT1', 'E17_CellCycle', 'E17_Ciliated', 'E17_Club', 'E17_Progenitor']
+res_b.gene_coefs.columns = res_b.prog_names
+
+for index_a, index_b in [(3,2), (4,2), (0,3), (0,4), (1,1), (2,0), (2,5)]:
+    comparator.compare_programs(res_a, index_a, res_b, index_b, comparison_dir, gp=gp)
+
+#%% E17 vs P3
+
+res_a = copy(decompositions['E17'][6])
+res_a.prog_names = ['E17_AT2', 'E17_AT1', 'E17_CellCycle', 'E17_Ciliated', 'E17_Club', 'E17_Progenitor']
+res_a.gene_coefs.columns = res_a.prog_names
+
+res_b = copy(decompositions['P3'][5])
+res_b.prog_names = ['P3_Ciliated', 'P3_Club', 'P3_AT1', 'P3_Progenitor', 'P3_AT2']
+res_b.gene_coefs.columns = res_b.prog_names
+
+for index_a, index_b in [(3,0), (4,1), (1,2), (0,4), (5,3)]:
+    comparator.compare_programs(res_a, index_a, res_b, index_b, comparison_dir, gp=gp)
 
 #%%
 

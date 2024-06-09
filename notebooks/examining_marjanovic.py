@@ -174,6 +174,19 @@ for cat_a, cat_b in pairs:
     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
     cmp.plot_marker_genes_heatmaps(marker_genes_ID, marker_genes_symbols)
 
+#%%
+gp = _utils.MyGProfiler(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'KEGG'])
+
+res_a = decompositions['04_K_12w_ND'][4]
+res_b = decompositions['05_K_30w_ND'][4]
+index_a = 2
+index_b = 2
+
+comparator.compare_programs(res_a, index_a, res_b, index_b,
+                            results_dir.joinpath('programs_comparisons'),
+                            genes_symbols=adata.var['geneSymbol'],
+                            gp=gp)
+
 
 #%%
 
