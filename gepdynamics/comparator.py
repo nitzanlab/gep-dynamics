@@ -1518,11 +1518,11 @@ class Comparator(object):
         dec_folder = _utils.set_dir(self.results_dir.joinpath('decompositions'))
 
         for res in [self.a_result, *self._all_results]:
-            heatmap_data = res.gene_coefs.loc[marker_genes].T
+            heatmap_data = res.gene_coefs.loc[marker_genes]
             sns.heatmap(heatmap_data, cmap='coolwarm', vmin=-2, vmax=2)
 
             if marker_gene_names is not None:
-                plt.xticks(0.5 + np.arange(len(marker_gene_names)), marker_gene_names)
+                plt.yticks(0.5 + np.arange(len(marker_gene_names)), marker_gene_names)
 
             plt.title(f'Marker genes coefficients for {res.name}')
             plt.tight_layout()
