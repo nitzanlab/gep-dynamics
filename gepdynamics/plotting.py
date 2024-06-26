@@ -54,7 +54,8 @@ def calculate_background_genes(nmf_results_list: List['NMFResultBase'],
 def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
                                 gene_list_cutoff=401,
                                 cutoff=801, # cutoff for coefficient ranks in comparison
-                                display_threshold_counts=100):
+                                display_threshold_counts=100,
+                                show_unassigned_genes=True):
     """
     Create Sankey plot for lung development dataset
 
@@ -76,6 +77,10 @@ def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
 
     # find the column with the best value per row
     best_rank_programs_lists = [coefficients.idxmin(axis=1) for coefficients in top_coefficients_lists]
+
+    if not show_unassigned_genes:
+        for i, coefficients in enumerate(top_coefficients_lists):
+            coefficients.drop(columns=[UNASSIGNED_GENES_COLUMN + f'_{i}'], inplace=True)
 
     labels = [column for coefficients in top_coefficients_lists for column in coefficients.columns]
     source = [] # indices correspond to labels
