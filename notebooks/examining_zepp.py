@@ -30,7 +30,8 @@ import numpy as np
 import pandas as pd
 # from scipy import sparse
 # from sklearn.metrics import silhouette_samples
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
+import seaborn as sns
 import scanpy as sc
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -51,6 +52,11 @@ decompositions = np.load(zepp_results_dir.joinpath('decompositions.npz'), allow_
 
 stages = ['E12', 'E15', 'E17', 'P3', 'P7']
 pairs = [(stages[i], stages[i + 1]) for i in range(len(stages) -1)]
+
+# %%
+adata = sc.read_h5ad(zepp_results_dir.joinpath('epi_subset.h5ad'))
+sc.pl.umap(adata, color=['development_stage', 'celltype'], show=False)
+plt.savefig(zepp_results_dir.joinpath('umap_celltype_stage.png'))
 
 # %%
 
@@ -100,27 +106,34 @@ for stage_a, stage_b in pairs:
     # Close the loop
     del adata_a, adata_b
 
+#%% Sankey plot
 
-#%%
+cp_rn = comparator.NMFResultBase.copy_and_rename_programs
 
 reload(plotting)
 
 plotting.pio.renderers.default = 'browser'
 # plotting.pio.renderers.default = 'svg'
 
-res_a = decompositions['E12'][5]
-res_b = decompositions['E15'][6]
-res_c = decompositions['E17'][6]
 
-res_a = decompositions['E15'][5]
-res_b = decompositions['E17'][6]
-res_c = decompositions['P3'][5]
+decomp_list = [
+    cp_rn(decompositions['E12'][5],
+          ['E12_Mphase', 'E12_Club', 'E12_Alveolar', 'E12_AT2', 'E12_Sphase']),
+    cp_rn(decompositions['E15'][5],
+          ['E15_Club', 'E15_AT1', 'E15_AT2', 'E15_Mphase', 'E15_Sphase']),
+    cp_rn(decompositions['E17'][6],
+          ['E17_AT2', 'E17_AT1', 'E17_CellCycle', 'E17_Ciliated', 'E17_Club', 'E17_Progenitor']),
+    cp_rn(decompositions['P3'][5],
+          ['P3_Ciliated', 'P3_Club', 'P3_AT1', 'P3_Progenitor', 'P3_AT2']),
+]
 
 plotting.plot_sankey_for_nmf_results(
-    [decompositions['E12'][5],  decompositions['E15'][5], decompositions['E17'][6], decompositions['P3'][5]],
+    decomp_list,
     gene_list_cutoff=101,
     cutoff=251, # cutoff for coefficient ranks in comparison
-    display_threshold_counts=55)
+    display_threshold_counts=55,
+    show_unassigned_genes=True,
+)
 
 #%% comparing programs pairs
 from copy import copy
@@ -188,6 +201,30 @@ sc.pl.stacked_violin(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2'], groupby='devel
 sc.pl.dotplot(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2'], groupby='development_stage')
 
 # df = subset.obs.loc[:, ['S.Score', 'G2M.Score', 'Phase']]
+
+#%% marker genes heatmap
+marker_genes = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a2", "Rsph1", "Foxj1",
+                "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
+                "Mki67", "Cdkn3", "Rrm2", "Lig1"]
+
+stage = 'E12'; k = 5; res = decompositions[stage][k];
+col_order = res.gene_coefs.columns[[1,4,0,2,3]]
+
+stage = 'E15'; k = 5; res = decompositions[stage][k];
+col_order = res.gene_coefs.columns[[0,3,1,2,4]]
+
+stage = 'E17'; k = 6; res = decompositions[stage][k];
+col_order = res.gene_coefs.columns[[3,4,0,1,2,5]]
+
+stage = 'P3'; k = 5; res = decompositions[stage][k];
+col_order = res.gene_coefs.columns[[0,1,4,2,3]]
+
+
+# Marker genes heatmap
+hm = sns.heatmap(res.gene_coefs.loc[marker_genes, col_order], cmap='coolwarm', vmin=-2, vmax=2)
+plt.tight_layout()
+hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_{stage}_{k}.png'))
+plt.close()
 
 #%% Club
 

@@ -28,7 +28,7 @@ import os
 import numbers
 import typing
 
-from copy import copy
+from copy import copy, deepcopy
 from typing import Tuple, Dict, Any, List, Union, Optional, Iterable
 
 import numpy as np
@@ -227,6 +227,31 @@ class NMFResultBase(object):
         """
         return pd.DataFrame([self.gene_coefs.nlargest(n, prog).index.tolist()
                              for prog in self.prog_names], index=self.prog_names).T
+
+    @staticmethod
+    def copy_and_rename_programs(original: 'NMFResultBase', new_prog_names: List[str]) -> 'NMFResultBase':
+        """
+        Copy the NMFResult object and rename the programs.
+
+        Parameters
+        ----------
+        original : NMFResultBase
+            The original NMFResult object to copy.
+        new_prog_names : List[str]
+            List of new program names.
+
+        Returns
+        -------
+        NMFResultBase
+            The copied NMFResult object with the new program names.
+        """
+        assert len(new_prog_names) == original.rank,\
+            "The number of new names must match the rank of the original object"
+        new_result = deepcopy(original)
+        new_result.prog_names = new_prog_names
+        new_result.gene_coefs.columns = new_prog_names
+        new_result.calculate_prog_labels()
+        return new_result
 
     def plot_loss_per_cell_histogram(self, bins: int = 25, max_value: float = 2500,
                                      saving_folder: _utils.PathLike = None,
