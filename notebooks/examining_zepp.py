@@ -58,6 +58,7 @@ adata = sc.read_h5ad(zepp_results_dir.joinpath('epi_subset.h5ad'))
 sc.pl.umap(adata, color=['development_stage', 'celltype'], show=False)
 plt.savefig(zepp_results_dir.joinpath('umap_celltype_stage.png'))
 
+
 # %%
 
 stage_a, stage_b = stages[:2]
@@ -66,9 +67,11 @@ comparison_dir = zepp_results_dir.joinpath(f"comparator_{stage_a}_{stage_b}")
 
 adata_a = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"{stage_a}.h5ad"))
 adata_b = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"{stage_b}.h5ad"))
+adata_c = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"{stages[2]}.h5ad"))
+adata_d = sc.read_h5ad(zepp_results_dir.joinpath("split_development_stage", f"{stages[3]}.h5ad"))
 
 # adding row colors
-for tmp in [adata_a, adata_b]:
+for tmp in [adata_a, adata_b, adata_c, adata_d]:
     tmp.obsm['row_colors'] = pd.concat([
         tmp.obs['celltype'].map(tmp.uns['celltype_colors_dict']),
         ], axis=1)
@@ -106,38 +109,36 @@ for stage_a, stage_b in pairs:
     # Close the loop
     del adata_a, adata_b
 
-#%% Sankey plot
+#%% results renaming preparation
 
 cp_rn = comparator.NMFResultBase.copy_and_rename_programs
+
+res_a = cp_rn(decompositions['E12'][5],
+      ['E12_Mphase', 'E12_Club', 'E12_Alveolar', 'E12_AT2', 'E12_Sphase'])
+res_b = cp_rn(decompositions['E15'][5],
+          ['E15_Club', 'E15_AT1', 'E15_AT2', 'E15_Mphase', 'E15_Sphase'])
+res_c = cp_rn(decompositions['E17'][6],
+          ['E17_AT2', 'E17_AT1', 'E17_CellCycle', 'E17_Ciliated', 'E17_Club', 'E17_Progenitor'])
+res_d = cp_rn(decompositions['P3'][5],
+          ['P3_Ciliated', 'P3_Club', 'P3_AT1', 'P3_Progenitor', 'P3_AT2'])
+
+
+#%% Sankey plot
 
 reload(plotting)
 
 plotting.pio.renderers.default = 'browser'
 # plotting.pio.renderers.default = 'svg'
 
-
-decomp_list = [
-    cp_rn(decompositions['E12'][5],
-          ['E12_Mphase', 'E12_Club', 'E12_Alveolar', 'E12_AT2', 'E12_Sphase']),
-    cp_rn(decompositions['E15'][5],
-          ['E15_Club', 'E15_AT1', 'E15_AT2', 'E15_Mphase', 'E15_Sphase']),
-    cp_rn(decompositions['E17'][6],
-          ['E17_AT2', 'E17_AT1', 'E17_CellCycle', 'E17_Ciliated', 'E17_Club', 'E17_Progenitor']),
-    cp_rn(decompositions['P3'][5],
-          ['P3_Ciliated', 'P3_Club', 'P3_AT1', 'P3_Progenitor', 'P3_AT2']),
-]
-
 plotting.plot_sankey_for_nmf_results(
-    decomp_list,
+    [res_a, res_b, res_c, res_d],
     gene_list_cutoff=101,
     cutoff=251, # cutoff for coefficient ranks in comparison
     display_threshold_counts=55,
-    show_unassigned_genes=True,
+    show_unassigned_genes=False,
 )
 
 #%% comparing programs pairs
-from copy import copy
-reload(comparator)
 
 comparison_dir = zepp_results_dir.joinpath('programs_comparisons')
 
@@ -146,44 +147,109 @@ gp = _utils.MyGProfiler(organism='mmusculus', sources=['GO:BP', 'WP', 'REAC', 'K
 
 #%% E12 vs E15
 
-res_a = copy(decompositions['E12'][5])
-res_a.prog_names = ['E12_Mphase', 'E12_Club', 'E12_Alveolar', 'E12_AT2', 'E12_Sphase']
-res_a.gene_coefs.columns = res_a.prog_names
-
-res_b = copy(decompositions['E15'][5])
-res_b.prog_names = ['E15_Club', 'E15_AT1', 'E15_AT2', 'E15_Mphase', 'E15_Sphase']
-res_b.gene_coefs.columns = res_b.prog_names
-
 for index_a, index_b in [(0,3), (4,4), (1,0), (1,1), (2,1), (2,2), (3,2)]:
     comparator.compare_programs(res_a, index_a, res_b, index_b, comparison_dir, gp=gp)
 
 #%% E15 vs E17
 
-res_a = copy(decompositions['E15'][5])
-res_a.prog_names = ['E15_Club', 'E15_AT1', 'E15_AT2', 'E15_Mphase', 'E15_Sphase']
-res_a.gene_coefs.columns = res_a.prog_names
 
-res_b = copy(decompositions['E17'][6])
-res_b.prog_names = ['E17_AT2', 'E17_AT1', 'E17_CellCycle', 'E17_Ciliated', 'E17_Club', 'E17_Progenitor']
-res_b.gene_coefs.columns = res_b.prog_names
-
-for index_a, index_b in [(3,2), (4,2), (0,3), (0,4), (1,1), (2,0), (2,5)]:
-    comparator.compare_programs(res_a, index_a, res_b, index_b, comparison_dir, gp=gp)
+for index_b, index_c in [(3,2), (4,2), (0,3), (0,4), (1,1), (2,0), (2,5)]:
+    comparator.compare_programs(res_b, index_b, res_c, index_c, comparison_dir, gp=gp)
 
 #%% E17 vs P3
 
-res_a = copy(decompositions['E17'][6])
-res_a.prog_names = ['E17_AT2', 'E17_AT1', 'E17_CellCycle', 'E17_Ciliated', 'E17_Club', 'E17_Progenitor']
-res_a.gene_coefs.columns = res_a.prog_names
+for index_c, index_d in [(3,0), (4,1), (1,2), (0,4), (5,3)]:
+    comparator.compare_programs(res_c, index_c, res_d, index_d, comparison_dir, gp=gp)
 
-res_b = copy(decompositions['P3'][5])
-res_b.prog_names = ['P3_Ciliated', 'P3_Club', 'P3_AT1', 'P3_Progenitor', 'P3_AT2']
-res_b.gene_coefs.columns = res_b.prog_names
 
-for index_a, index_b in [(3,0), (4,1), (1,2), (0,4), (5,3)]:
-    comparator.compare_programs(res_a, index_a, res_b, index_b, comparison_dir, gp=gp)
+#%% marker genes heatmap
+marker_genes = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a2", "Rsph1", "Foxj1",
+                "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
+                "Mki67", "Cdkn3", "Rrm2", "Lig1"]
 
-#%%
+stage = 'E12'; k = 5; res = decompositions[stage][k]
+col_order = res.gene_coefs.columns[[1,4,0,2,3]]
+
+stage = 'E15'; k = 5; res = decompositions[stage][k]
+col_order = res.gene_coefs.columns[[0,3,1,2,4]]
+
+stage = 'E17'; k = 6; res = decompositions[stage][k]
+col_order = res.gene_coefs.columns[[3,4,0,1,2,5]]
+
+stage = 'P3'; k = 5; res = decompositions[stage][k]
+col_order = res.gene_coefs.columns[[0,1,4,2,3]]
+
+
+# Marker genes heatmap
+hm = sns.heatmap(res.gene_coefs.loc[marker_genes, col_order], cmap='coolwarm', vmin=-2, vmax=2)
+plt.tight_layout()
+hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_{stage}_{k}.png'))
+plt.close()
+
+#%% marker genes dynamics for proximal and cell cycle programs
+reload(plotting)
+
+empty_column = pd.Series(np.zeros(res_a.gene_coefs.shape[0]), index=res_a.gene_coefs.index, name='empty')
+
+programs_list = [
+    res_a.gene_coefs['E12_Club'],
+    res_b.gene_coefs['E15_Club'],
+    res_c.gene_coefs['E17_Club'],
+    res_d.gene_coefs['P3_Club'],
+    res_c.gene_coefs['E17_Ciliated'],
+    res_d.gene_coefs['P3_Ciliated'],
+    empty_column,
+    res_a.gene_coefs['E12_Mphase'],
+    res_a.gene_coefs['E12_Sphase'],
+    res_b.gene_coefs['E15_Mphase'],
+    res_b.gene_coefs['E15_Sphase'],
+    res_c.gene_coefs['E17_CellCycle'],
+    ]
+
+plotting.plot_marker_genes_heatmaps(programs_list, marker_genes, show=False,
+                           title='Marker gene coefficients for proximal cell programs',
+                           save_file = zepp_results_dir.joinpath('marker_genes_dynamics.png'))
+
+
+#%% projection of utilization from consecutive stages
+
+plt.close()
+fig, ax = plt.subplots(figsize=(7, 6.5))
+
+sets = [(adata_a, res_a, 1, 'E12 Club', 'Blues'),
+        (adata_b, res_b, 0, 'E15 Club', 'Purples'),
+        (adata_c, res_c, 4, 'E17 Club', 'Reds'),
+        (adata_d, res_d, 1, 'P3 Club', 'Oranges'),]
+
+# Prepare a list to hold the legend patches
+legend_patches = []
+
+for adata_x, res_x, prog, label, color in sets:
+    cmap = sns.color_palette(color, as_cmap=True)
+    plt.scatter(adata_x.obsm['X_umap'][:, 0], adata_x.obsm['X_umap'][:, 1],
+                c=res_x.norm_usages[:, prog], s=1, cmap=cmap)
+
+    # Get two colors from the colormap for the label
+    colors = [cmap(i) for i in [0.1, 0.9]]
+    for i, col in enumerate(colors):
+        patch = plt.matplotlib.patches.Patch(color=col, label=f'{label} - {"Low" if i == 0 else "High"}')
+        legend_patches.append(patch)
+
+#axes settings:
+plt.xticks([])
+plt.xlabel('UMAP1')
+
+plt.yticks([])
+plt.ylabel('UMAP2')
+
+plt.title('Utilization of Club cell program in consecutive stages')
+plt.legend(handles=legend_patches)
+plt.tight_layout()
+plt.savefig(zepp_results_dir.joinpath('utilization_club_programs.png'), dpi=300)
+
+
+
+#%% cell cycle visualization
 
 subset = sc.read_h5ad(zepp_results_dir.joinpath("epi_subset.h5ad"))
 sc.pp.normalize_total(subset, target_sum=5e3, exclude_highly_expressed=True)
@@ -195,103 +261,8 @@ import warnings
 
 #%%
 
-
 sc.pl.violin(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2', 'Lig1'])
 sc.pl.stacked_violin(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2'], groupby='development_stage')
 sc.pl.dotplot(subset, ['Top2a', 'Cdkn3', 'Mki67', 'Rrm2'], groupby='development_stage')
 
 # df = subset.obs.loc[:, ['S.Score', 'G2M.Score', 'Phase']]
-
-#%% marker genes heatmap
-marker_genes = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a2", "Rsph1", "Foxj1",
-                "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
-                "Mki67", "Cdkn3", "Rrm2", "Lig1"]
-
-stage = 'E12'; k = 5; res = decompositions[stage][k];
-col_order = res.gene_coefs.columns[[1,4,0,2,3]]
-
-stage = 'E15'; k = 5; res = decompositions[stage][k];
-col_order = res.gene_coefs.columns[[0,3,1,2,4]]
-
-stage = 'E17'; k = 6; res = decompositions[stage][k];
-col_order = res.gene_coefs.columns[[3,4,0,1,2,5]]
-
-stage = 'P3'; k = 5; res = decompositions[stage][k];
-col_order = res.gene_coefs.columns[[0,1,4,2,3]]
-
-
-# Marker genes heatmap
-hm = sns.heatmap(res.gene_coefs.loc[marker_genes, col_order], cmap='coolwarm', vmin=-2, vmax=2)
-plt.tight_layout()
-hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_{stage}_{k}.png'))
-plt.close()
-
-#%% Club
-
-marker_genes = ['Krt8', 'Hopx', 'Klf6', 'Aqp5', 'Sftpa1', 'Sftpb', 'Sftpc',
-                'Mki67', 'Top2a', 'Rrm1', 'Rrm2',
-                'Sox2', 'Scgb3a2', 'Foxj1', 'Dynlrb2', 'Hoxa5', 'Col5a2', ]
-
-programs_list = [
-    adata_a.varm['usage_coefs']['E12.p1'],
-    adata_b.varm['usage_coefs']['E15.p3'],
-    adata_c.varm['usage_coefs']['E17.p5']]
-
-plot_marker_genes_heatmaps(programs_list, marker_genes, show=False,
-                           title='Marker gene coefficients for Club cell programs',
-                           save_file = zepp_results_dir.joinpath('marker_genes_heatmaps Club.png'))
-
-#%% Ciliated
-
-programs_list = [
-    adata_a.varm['usage_coefs'],
-    adata_b.varm['usage_coefs']['E15.p5'],
-    adata_c.varm['usage_coefs']['E17.p4']]
-
-plot_marker_genes_heatmaps(programs_list, marker_genes, show=True,
-                           title='Marker gene coefficients for Ciliated programs',
-                           save_file = zepp_results_dir.joinpath('marker_genes_heatmaps Ciliated.png')
-                           )
-
-#%% Alveolar
-
-# monotonically increasing time
-programs_list = [
-    adata_a.varm['usage_coefs']['E12.p5'],
-    adata_a.varm['usage_coefs']['E12.p3'],
-    adata_b.varm['usage_coefs']['E15.p1'],
-    adata_b.varm['usage_coefs']['E15.p0'],
-    adata_c.varm['usage_coefs']['E17.p1'],
-    adata_c.varm['usage_coefs']['E17.p0'],
-    adata_c.varm['usage_coefs']['E17.p3'],
-]
-# # None monotonic
-# programs_list = [
-#     adata_a.varm['usage_coefs']['E12.p5'],
-#     adata_b.varm['usage_coefs']['E15.p1'],
-#     adata_c.varm['usage_coefs']['E17.p1'],
-#     adata_c.varm['usage_coefs']['E17.p3'],
-#     adata_c.varm['usage_coefs']['E17.p0'],
-#     adata_b.varm['usage_coefs']['E15.p0'],
-#     adata_a.varm['usage_coefs']['E12.p3'],
-# ]
-
-plot_marker_genes_heatmaps(programs_list, marker_genes, show=True,
-                           title='Marker gene coefficients for Alveolar programs',
-                           save_file = zepp_results_dir.joinpath('marker_genes_heatmaps Alveolar 2.png')
-                           )
-
-#%% Cell Cycle
-
-programs_list = [
-    adata_a.varm['usage_coefs']['E12.p2'],
-    adata_b.varm['usage_coefs']['E15.p2'],
-    adata_c.varm['usage_coefs']['E17.p2'],
-    adata_b.varm['usage_coefs']['E15.p4'],
-    adata_a.varm['usage_coefs']['E12.p4'],
-]
-
-plot_marker_genes_heatmaps(programs_list, marker_genes, show=True,
-                           title='Marker gene coefficients for cell cycle programs',
-                           save_file = zepp_results_dir.joinpath('marker_genes_heatmaps cell cycle.png')
-                           )

@@ -141,7 +141,7 @@ def plot_marker_genes_heatmaps(programs_list: List[pd.Series],
     # create dataframe from the list of series
     df = pd.concat(programs_list, axis=1)
 
-    sns.heatmap(df.loc[marker_genes].T, cmap='coolwarm', vmin=-2, vmax=2)
+    sns.heatmap(df.loc[marker_genes], cmap='coolwarm', vmin=-2, vmax=2)
 
     if title is None:
         title = 'Marker genes coefficients'
@@ -150,7 +150,7 @@ def plot_marker_genes_heatmaps(programs_list: List[pd.Series],
     plt.tight_layout()
 
     if save_file is not None:
-        plt.savefig(save_file)
+        plt.savefig(save_file, dpi=300)
     if show:
         plt.show()
     plt.close()
