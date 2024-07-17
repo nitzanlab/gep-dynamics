@@ -260,3 +260,52 @@ def plot_layered_correlation_flow_chart(layer_keys,
     plt.tight_layout()
 
     return fig
+
+
+def plot_joint_utilization_projection(sets, title, save_file, obsm_coordinates='X_umap', show=False):
+    """
+    Plot the projection of utilization from consecutive stages
+
+    The sets parameter is a list of tuples, each consisted of the following:
+    - adata_x: an AnnData object containing the data to be plotted
+    - res_x: the NMFResult object containing the results of the decomposition
+    - prog: the index of the program to be plotted
+    - label: the label to be displayed in the legend
+    - color: the color palette to be used for the scatter
+
+    """
+
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+
+    # Prepare a list to hold the legend patches
+    legend_patches = []
+
+    for adata_x, res_x, prog, label, color in sets:
+        cmap = sns.color_palette(color, as_cmap=True)
+        coordinates = adata_x.obsm[obsm_coordinates]
+        plt.scatter(coordinates[:, 0], coordinates[:, 1],
+                    c=res_x.norm_usages[:, prog], s=1, cmap=cmap)
+
+        # Get two colors from the colormap for the label
+        colors = [cmap(i) for i in [0.1, 0.9]]
+        for i, col in enumerate(colors):
+            patch = plt.matplotlib.patches.Patch(color=col, label=f'{label} - {"Low" if i == 0 else "High"}')
+            legend_patches.append(patch)
+
+    plt.xticks([])
+    plt.xlabel(f'{obsm_coordinates[2:].upper()}1')
+
+    plt.yticks([])
+    plt.ylabel(f'{obsm_coordinates[2:].upper()}2')
+
+    plt.title(title)
+    # position legend outside of the plot
+    plt.legend(handles=legend_patches, loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.tight_layout()
+    plt.savefig(save_file, dpi=300)
+
+    if show:
+        plt.show()
+
+    plt.close()
+

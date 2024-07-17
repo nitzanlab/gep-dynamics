@@ -210,43 +210,58 @@ plotting.plot_marker_genes_heatmaps(programs_list, marker_genes, show=False,
                            title='Marker gene coefficients for proximal cell programs',
                            save_file = zepp_results_dir.joinpath('marker_genes_dynamics.png'))
 
+#%% projection of utilization from consecutive stages - Club
 
-#%% projection of utilization from consecutive stages
+sets = [(adata_a, res_a, 1, 'E12 Club', 'Greens'),
+        (adata_b, res_b, 0, 'E15 Club', 'Blues'),
+        (adata_c, res_c, 4, 'E17 Club', 'Purples'),
+        (adata_d, res_d, 1, 'P3 Club', 'Reds'),]
 
-plt.close()
-fig, ax = plt.subplots(figsize=(7, 6.5))
+title = 'Utilization of Club cell program in consecutive stages'
+filename = zepp_results_dir.joinpath('utilization_club_programs.png')
 
-sets = [(adata_a, res_a, 1, 'E12 Club', 'Blues'),
-        (adata_b, res_b, 0, 'E15 Club', 'Purples'),
-        (adata_c, res_c, 4, 'E17 Club', 'Reds'),
-        (adata_d, res_d, 1, 'P3 Club', 'Oranges'),]
+plotting.plot_joint_utilization_projection(sets, title, filename, show=False)
 
-# Prepare a list to hold the legend patches
-legend_patches = []
+#%% projection of utilization from consecutive stages - ciliated
 
-for adata_x, res_x, prog, label, color in sets:
-    cmap = sns.color_palette(color, as_cmap=True)
-    plt.scatter(adata_x.obsm['X_umap'][:, 0], adata_x.obsm['X_umap'][:, 1],
-                c=res_x.norm_usages[:, prog], s=1, cmap=cmap)
+reload(plotting)
 
-    # Get two colors from the colormap for the label
-    colors = [cmap(i) for i in [0.1, 0.9]]
-    for i, col in enumerate(colors):
-        patch = plt.matplotlib.patches.Patch(color=col, label=f'{label} - {"Low" if i == 0 else "High"}')
-        legend_patches.append(patch)
+sets = [(adata_a, res_a, 1, 'E12 Club', 'Greens'),
+        (adata_b, res_b, 0, 'E15 Club', 'Blues'),
+        (adata_c, res_c, 3, 'E17 Ciliated', 'Purples'),
+        (adata_d, res_d, 0, 'P3 Ciliated', 'Reds'),]
 
-#axes settings:
-plt.xticks([])
-plt.xlabel('UMAP1')
+title = 'Utilization of Ciliated cell program in consecutive stages'
+filename = zepp_results_dir.joinpath('utilization_ciliated_programs.png')
 
-plt.yticks([])
-plt.ylabel('UMAP2')
+plotting.plot_joint_utilization_projection(sets, title, filename, show=False)
 
-plt.title('Utilization of Club cell program in consecutive stages')
-plt.legend(handles=legend_patches)
-plt.tight_layout()
-plt.savefig(zepp_results_dir.joinpath('utilization_club_programs.png'), dpi=300)
+#%% projection of utilization from consecutive stages - alveolar type 1
 
+reload(plotting)
+
+sets = [(adata_a, res_a, 2, 'E12 Alveolar', 'Greens'),
+        (adata_b, res_b, 1, 'E15 AT1', 'Blues'),
+        (adata_c, res_c, 1, 'E17 AT1', 'Purples'),
+        (adata_d, res_d, 2, 'P3 AT1', 'Reds'),]
+
+title = 'Utilization of AT1 cell program in consecutive stages'
+filename = zepp_results_dir.joinpath('utilization_at1_programs.png')
+
+plotting.plot_joint_utilization_projection(sets, title, filename, show=False)
+
+#%% projection of utilization from consecutive stages - cell cycle m
+
+reload(plotting)
+
+sets = [(adata_a, res_a, 0, 'E12 Mphase', 'Greens'),
+        (adata_b, res_b, 3, 'E15 Mphase', 'Blues'),
+        (adata_c, res_c, 2, 'E17 CellCycle', 'Purples'),]
+
+title = 'Utilization of cell cycle programs in consecutive stages'
+filename = zepp_results_dir.joinpath('utilization_mphase_programs.png')
+
+plotting.plot_joint_utilization_projection(sets, title, filename, show=False)
 
 
 #%% cell cycle visualization
