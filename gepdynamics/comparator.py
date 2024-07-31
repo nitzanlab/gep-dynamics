@@ -1803,7 +1803,8 @@ def compare_programs(res_a: NMFResultBase, index_a: int, res_b: NMFResultBase,
                      top_genes: int = 500,
                      genes_symbols: Iterable[str] = None,
                      gp: _utils.MyGProfiler = None,
-                     show_plot: bool = False):
+                     show_plot: bool = False,
+                     gprofiler_kwargs: Dict[str, Any] = None):
     """
     Compare a pair of programs between two NMF results.
 
@@ -1915,11 +1916,14 @@ def compare_programs(res_a: NMFResultBase, index_a: int, res_b: NMFResultBase,
         # perform GSEA and save results:
         background_genes = genes_symbols.to_list()
 
-        gp.profile(ordered_shared.to_list(), ordered=True, background=background_genes
+        gp.profile(ordered_shared.to_list(), ordered=True,
+                   background=background_genes, **gprofiler_kwargs
                    ).to_csv(save_dir.joinpath(f'{prefix}_shared_genes_gsea.csv'))
-        gp.profile(ordered_unique_a.to_list(), ordered=True, background=background_genes
+        gp.profile(ordered_unique_a.to_list(), ordered=True,
+                   background=background_genes, **gprofiler_kwargs
                    ).to_csv(save_dir.joinpath(f'{prefix}_unique_a_genes_gsea.csv'))
-        gp.profile(ordered_unique_b.to_list(), ordered=True, background=background_genes
+        gp.profile(ordered_unique_b.to_list(), ordered=True,
+                   background=background_genes, **gprofiler_kwargs
                    ).to_csv(save_dir.joinpath(f'{prefix}_unique_b_genes_gsea.csv'))
 
 

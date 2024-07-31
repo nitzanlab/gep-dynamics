@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from typing import List, Dict, Iterable, Literal
+from typing import List, Dict, Iterable, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,17 @@ pio.renderers.default = 'browser'
 # pio.renderers.default = 'svg'
 
 UNASSIGNED_GENES_COLUMN = 'unassigned'
+
+
+# colors for joint projections plots
+mpl_colors = plt.matplotlib.colors
+
+PROJ_COLORS_LIST = ['red', 'green', 'blue', 'magenta', 'cyan', 'yellow']
+PROJ_COLORS_LIST = [tuple([0.75 * entry for entry in mpl_colors.to_rgb(color)]
+                          ) for color in PROJ_COLORS_LIST]
+PROJ_COLORS_LIST = [mpl_colors.LinearSegmentedColormap.from_list(
+    f'{i}', ['lightgray', color]) for i, color in enumerate(PROJ_COLORS_LIST)]
+
 
 
 def get_rank_from_coefs(orig_coefficients, gene_indices, cutoff):
@@ -72,15 +83,16 @@ def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
     top_coefficients_lists = [get_rank_from_coefs(
         nmf_res.gene_coefs, bg_genes, cutoff) for nmf_res in nmf_results_list]
 
-    for i, coefficients in enumerate(top_coefficients_lists):
-        coefficients.rename(columns={UNASSIGNED_GENES_COLUMN: UNASSIGNED_GENES_COLUMN + f'_{i}'}, inplace=True)
+    if show_unassigned_genes:
+        for i, coefficients in enumerate(top_coefficients_lists):
+            coefficients.rename(columns={UNASSIGNED_GENES_COLUMN: UNASSIGNED_GENES_COLUMN + f'_{i}'}, inplace=True)
 
     # find the column with the best value per row
     best_rank_programs_lists = [coefficients.idxmin(axis=1) for coefficients in top_coefficients_lists]
 
     if not show_unassigned_genes:
         for i, coefficients in enumerate(top_coefficients_lists):
-            coefficients.drop(columns=[UNASSIGNED_GENES_COLUMN + f'_{i}'], inplace=True)
+            coefficients.drop(columns=[UNASSIGNED_GENES_COLUMN], inplace=True)
 
     labels = [column for coefficients in top_coefficients_lists for column in coefficients.columns]
     source = [] # indices correspond to labels
@@ -90,16 +102,22 @@ def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
 
     # calculate links for each pair of programs from adjacent points
     for k in range(len(nmf_results_list)-1):
+        offset_source = sum([len(coefficients.columns) for coefficients in top_coefficients_lists[:k]])
+        offset_target = sum([len(coefficients.columns) for coefficients in top_coefficients_lists[:k + 1]])
         for i, col_a in enumerate(top_coefficients_lists[k].columns):
             for j, col_b in enumerate(top_coefficients_lists[k+1].columns):
                 val = sum((best_rank_programs_lists[k] == col_a) & (best_rank_programs_lists[k+1] == col_b))
                 if val > display_threshold_counts:
-                    source.append(i + sum([coefficients.shape[1] for coefficients in top_coefficients_lists[:k]]))
-                    target.append(j + sum([coefficients.shape[1] for coefficients in top_coefficients_lists[:k+1]]))
+                    source.append(i + offset_source)
+                    target.append(j + offset_target)
                     value.append(val)
                     link_colors.append('lightgreen')
                     if col_a.startswith(UNASSIGNED_GENES_COLUMN) or col_b.startswith(UNASSIGNED_GENES_COLUMN):
                         link_colors[-1] = 'lightgrey'
+
+    # x_positions should loop twice over
+    x_positions = [[k / (len(nmf_results_list) - 1)] * top_coefficients_lists[k].shape[1] for k in range(len(nmf_results_list))]
+    x_positions = [item for sublist in x_positions for item in sublist]
 
     # create a list of node colors that is blue for all except unassigned genes
     node_colors = []
@@ -111,14 +129,18 @@ def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
 
     fig = go.Figure(data=[go.Sankey(
         node = dict(
-          pad = 15,
-          thickness = 20,
-          line = dict(color = "black", width = 0.5),
-          label = labels,
-          color = node_colors
+            pad = 15,
+            thickness = 20,
+            line = dict(color = "black", width = 0.5),
+            label = labels,
+            color = node_colors,
+            # x=x_positions,
+            # y=[0.1]*len(labels)
         ),
         link = dict(
-          source = source, target = target, value = value, color=link_colors))])
+          source = source, target = target, value = value, color=link_colors),
+        # arrangement='snap',
+    )])
 
     fig.update_layout(title_text=f"Sankey Diagram for top {gene_list_cutoff-1} prominent gene coefficients. "
                                  f"Background is {len(bg_genes)} highly ranked genes (top {cutoff-1} per program)"
@@ -128,6 +150,7 @@ def plot_sankey_for_nmf_results(nmf_results_list: List['NMFResultBase'],
 
 def plot_marker_genes_heatmaps(programs_list: List[pd.Series],
                                marker_genes: List[str],
+                               marker_gene_names: Optional[List[str]] = None,
                                title: str = None,
                                show: bool = False,
                                save_file: _utils.PathLike = None):
@@ -142,6 +165,9 @@ def plot_marker_genes_heatmaps(programs_list: List[pd.Series],
     df = pd.concat(programs_list, axis=1)
 
     sns.heatmap(df.loc[marker_genes], cmap='coolwarm', vmin=-2, vmax=2)
+
+    if marker_gene_names is not None:
+        plt.yticks(ticks=0.5 + np.arange(len(marker_gene_names)), labels=marker_gene_names, rotation=0)
 
     if title is None:
         title = 'Marker genes coefficients'
@@ -277,20 +303,27 @@ def plot_joint_utilization_projection(sets, title, save_file, obsm_coordinates='
 
     fig, ax = plt.subplots(figsize=(9, 6.5))
 
-    # Prepare a list to hold the legend patches
-    legend_patches = []
+    # Prepare a list to hold the legend elements
+    legend_elements = []
 
-    for adata_x, res_x, prog, label, color in sets:
-        cmap = sns.color_palette(color, as_cmap=True)
+    for adata_x, res_x, prog, label, cmap in sets:
         coordinates = adata_x.obsm[obsm_coordinates]
         plt.scatter(coordinates[:, 0], coordinates[:, 1],
-                    c=res_x.norm_usages[:, prog], s=1, cmap=cmap)
+                    c=res_x.norm_usages[:, prog], s=2, cmap=cmap)
 
-        # Get two colors from the colormap for the label
-        colors = [cmap(i) for i in [0.1, 0.9]]
-        for i, col in enumerate(colors):
-            patch = plt.matplotlib.patches.Patch(color=col, label=f'{label} - {"Low" if i == 0 else "High"}')
-            legend_patches.append(patch)
+        colors = [cmap(i) for i in [0.1, 0.45, 0.9]]
+        Line2D = plt.matplotlib.lines.Line2D
+
+        legend_elements.append(((*[
+            Line2D([0], [0], marker='o', color=colors[i], linestyle='None', markersize=6, label=label) for i in range(3)],), label))
+
+    # Create the custom legend
+    legend = ax.legend([elem[0] for elem in legend_elements],
+                       [elem[1] for elem in legend_elements],
+                       handler_map={tuple: plt.matplotlib.legend_handler.HandlerTuple(ndivide=None)})
+
+    # Add the legend to the plot
+    ax.add_artist(legend)
 
     plt.xticks([])
     plt.xlabel(f'{obsm_coordinates[2:].upper()}1')
@@ -299,8 +332,7 @@ def plot_joint_utilization_projection(sets, title, save_file, obsm_coordinates='
     plt.ylabel(f'{obsm_coordinates[2:].upper()}2')
 
     plt.title(title)
-    # position legend outside of the plot
-    plt.legend(handles=legend_patches, loc='center left', bbox_to_anchor=(1, 0.5))
+
     plt.tight_layout()
     plt.savefig(save_file, dpi=300)
 
