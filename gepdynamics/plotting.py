@@ -171,7 +171,7 @@ def plot_marker_genes_heatmaps(programs_list: List[pd.Series],
 
     if title is None:
         title = 'Marker genes coefficients'
-    plt.title(title)
+    plt.title(title, y=1.05)
 
     plt.tight_layout()
 

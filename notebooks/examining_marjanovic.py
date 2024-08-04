@@ -33,6 +33,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import scanpy as sc
+from sklearn.linear_model import LinearRegression
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -92,6 +93,28 @@ res_kp30 = cp_rn(decompositions['08_KP_30w_ND'][6],
                     ["KP30_Cluster11", "KP30_HPCS", "KP30_Cluster8",
                         "KP30_Clusters_9_10", "KP30_AT2_Cluster12", "KP30_AT1"])
 
+all_res = {'00_All_early': res_t0, '04_K_12w_ND': res_k12, '05_K_30w_ND': res_k30,
+           '06_KP_12w_ND': res_kp12, '07_KP_20w_ND': res_kp20, '08_KP_30w_ND': res_kp30}
+
+del cp_rn
+
+
+#%% log average TP5k expression
+
+for cat in categories:
+    res = all_res[cat]
+
+    X = split_adatas[cat].X.toarray()
+    X = X * 1_000_000. / X.sum(axis=1, keepdims=True)
+
+    nnls_reg = LinearRegression(positive=True, fit_intercept=False)
+
+    data = nnls_reg.fit(res.norm_usages, X).coef_
+    gene_importance = pd.DataFrame(np.log1p(data),
+                                   index=res.gene_coefs.index, columns=res.gene_coefs.columns)
+    res.gene_importance = gene_importance
+
+    del nnls_reg
 
 # %% Sanky plot
 
@@ -135,11 +158,40 @@ for cat_a, cat_b in pairs:
     cmp.plot_marker_genes_heatmaps(marker_genes_ID, marker_genes_symbols)
     cmp.plot_utilization_scatters('X_phate')
 
-#%% plotting marker genes of AT2 and HPCS programs dynamics
+
+#%% per program marker genes TPM heatmap (no reordering)
+
+for cat in categories:
+    res = all_res[cat]
+    k = res.rank
+
+    # Marker genes heatmap
+    plt.figure(figsize=(6, 6))
+    hm = sns.heatmap(res.gene_importance.loc[marker_genes_ID], cmap='BuGn', vmax=12)
+    plt.yticks(0.5 + np.arange(len(marker_genes_symbols)), marker_genes_symbols)
+    plt.tight_layout()
+    hm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_tpm_{cat}_{k}.png'))
+    plt.close()
+
+#%% per program marker genes heatmap (reordering)
+
+cat = '06_KP_12w_ND'; k = 5; res = res_kp12
+col_order = res.gene_coefs.columns[[0,4,1,2,3]]
+
+# Marker genes heatmap
+plt.figure(figsize=(6, 6))
+hm = sns.heatmap(res.gene_coefs.loc[marker_genes_ID, col_order], cmap='coolwarm', vmin=-2, vmax=2)
+plt.yticks(0.5 + np.arange(len(marker_genes_symbols)), marker_genes_symbols)
+plt.tight_layout()
+hm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_{cat}_{k}.png'))
+plt.close()
+
+
+#%% plotting marker genes coefs dynamics of AT2 and HPCS programs dynamics
 
 reload(plotting)
 
-empty_column = pd.Series(np.zeros(res_t0.gene_coefs.shape[0]), index=res_t0.gene_coefs.index, name='empty')
+empty_column = pd.Series(np.zeros(res_t0.gene_coefs.shape[0]), index=res_t0.gene_coefs.index, name='')
 
 programs_list = [
     res_t0.gene_coefs['T0_Interferon_HPCS'],
@@ -162,20 +214,87 @@ plotting.plot_marker_genes_heatmaps(
     title='Programs dynamic shown by marker genes', show=False,
     save_file=marjanovic_results_dir.joinpath('marker_genes_dynamics.png'))
 
+#%% plotting marker genes TPM dynamics of AT2 and HPCS programs dynamics
 
-#%% per program marker genes heatmap
+programs_list = [
+    res_t0.gene_importance['T0_Interferon_HPCS'],
+    res_k12.gene_importance['K12_HPCS'],
+    res_k30.gene_importance['K30_HPCS'],
+    res_kp12.gene_importance[['KP12_HPCS', 'KP12_Cluster6']],
+    res_kp20.gene_importance['KP20_HPCS'],
+    res_kp30.gene_importance['KP30_HPCS'],
+    empty_column,
+    res_t0.gene_importance['T0_AT2'],
+    res_k12.gene_importance['K12_AT2'],
+    res_k30.gene_importance[['K30_Metabolism2', 'K30_AT2']],
+    res_kp12.gene_importance['KP12_AT2'],
+    res_kp20.gene_importance[['KP20_Cluster8', 'KP20_AT2_H2']],
+    res_kp30.gene_importance[['KP30_AT1', 'KP30_AT2_Cluster12']],
+    ]
 
-cat = '06_KP_12w_ND'; k = 5; res = decompositions[cat][k]
-col_order = res.gene_coefs.columns[[0,4,1,2,3]]
+#%%
+
+marker_genes_symbols = ["Sox9",'Sftpa1', 'Sftpb', 'Sftpc', 'Sftpd',
+                        'Irx3', 'Cebpa', 'Irx5', 'Etv5', 'Tfcp2l1', 'Dbp',
+                        "Tigit", "Slc4a11", "Igfbp4", "Fn1",
+'Lyz2',
+ 'Cbr2',
+ 'Sftpc',
+ 'Scd1',
+ 'Hc',
+ 'Slc34a2',
+ 'Chil1',
+ 'Chia1',
+ 'Itih4',
+ 'Lrg1',
+ 'Kcnj15',
+ 'Hp',
+ 'Acoxl',
+ 'Napsa',
+ 'Lcn2',
+ 'Lyz1',
+ 'Mfsd2a',
+ 'Nkd1',
+ 'Sftpa1',
+ 'Aox3'
+                        ]
+
+marker_genes_ID = [adata.var.index[adata.var['geneSymbol'] == gene].tolist()[0] for gene in marker_genes_symbols]
 
 # Marker genes heatmap
-plt.figure(figsize=(6, 6))
-hm = sns.heatmap(res.gene_coefs.loc[marker_genes_ID, col_order], cmap='coolwarm', vmin=-2, vmax=2)
+plt.figure(figsize=(8, 6))
+hm = sns.heatmap(pd.concat(programs_list, axis=1).loc[marker_genes_ID], cmap='BuGn', vmax=12)
 plt.yticks(0.5 + np.arange(len(marker_genes_symbols)), marker_genes_symbols)
+
+plt.title('Marker genes log-TPM dynamics', y=1.05)
 plt.tight_layout()
-hm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_{cat}_{k}.png'))
+
+hm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_tpm_dynamics 4.png'))
 plt.close()
 
+#%%
+
+all_gene_importance = pd.concat([all_res[cat].gene_importance for cat in categories], axis=1)
+all_gene_importance.index = adata.var['geneSymbol']
+
+all_gene_importance.columns
+AT2_matching_vector = all_gene_importance.columns.str.contains('AT2')
+HPCS_matching_vector = all_gene_importance.columns.str.contains('HPCS')
+
+# correlate all rows of all gene importance with the at2 matching vector
+vec = HPCS_matching_vector.astype(np.float32)
+vec = AT2_matching_vector.astype(np.float32)
+vec -= vec.mean()
+vec = vec / np.linalg.norm(vec)
+
+rows = all_gene_importance.values.copy()
+rows -= rows.mean(axis=1, keepdims=True)
+rows = rows / np.linalg.norm(rows, axis=1, keepdims=True)
+
+corrs = pd.DataFrame(data=(rows @ vec * all_gene_importance.std(axis=1)), index=all_gene_importance.index, columns=['AT2_matching'])
+corrs.sort_values('AT2_matching', ascending=False, inplace=True)
+
+tmp = all_gene_importance.loc[corrs.index]
 
 #%% comparing programs pairs
 

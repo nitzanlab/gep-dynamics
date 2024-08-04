@@ -101,6 +101,23 @@ res_c = cp_rn(decompositions['E17'][6],
 res_d = cp_rn(decompositions['P3'][5],
           ['P3_Ciliated', 'P3_Club', 'P3_AT1', 'P3_Progenitor', 'P3_AT2'])
 
+del cp_rn
+
+
+#%% log average TP5k expression
+
+for res, adata in zip([res_a, res_b, res_c, res_d], [adata_a, adata_b, adata_c, adata_d]):
+    X = adata.X.toarray()
+    X = X * 5000. / X.sum(axis=1, keepdims=True)
+
+    nnls_reg = LinearRegression(positive=True, fit_intercept=False)
+
+    data = nnls_reg.fit(res.norm_usages, X).coef_
+    gene_importance = pd.DataFrame(np.log1p(data),
+                                   index=res.gene_coefs.index, columns=res.gene_coefs.columns)
+    res.gene_importance = gene_importance
+
+    del nnls_reg
 
 #%% Sankey plot
 
@@ -146,71 +163,46 @@ marker_genes = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a2", "Rsph1", "Foxj1",
                 "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
                 "Mki67", "Cdkn3", "Rrm2", "Lig1"]
 
-stage = 'E12'; k = 5; res = decompositions[stage][k]
+stage = 'E12'; k = 5; res = res_a
 col_order = res.gene_coefs.columns[[1,4,0,2,3]]
 
-stage = 'E15'; k = 5; res = decompositions[stage][k]
+stage = 'E15'; k = 5; res = res_b
 col_order = res.gene_coefs.columns[[0,3,1,2,4]]
 
-stage = 'E17'; k = 6; res = decompositions[stage][k]
+stage = 'E17'; k = 6; res = res_c
 col_order = res.gene_coefs.columns[[3,4,0,1,2,5]]
 
-stage = 'P3'; k = 5; res = decompositions[stage][k]
+stage = 'P3'; k = 5; res = res_d
 col_order = res.gene_coefs.columns[[0,1,4,2,3]]
 
 
-# Marker genes heatmap
+# Marker genes coefs heatmap
 hm = sns.heatmap(res.gene_coefs.loc[marker_genes, col_order], cmap='coolwarm', vmin=-2, vmax=2)
 plt.tight_layout()
 hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_{stage}_{k}.png'))
 plt.close()
 
+# Marker genes importance heatmap
+hm = sns.heatmap(res.gene_importance.loc[marker_genes, col_order], cmap='BuGn', vmax=3)
+plt.title('Marker genes log-TP5K', y=1.05)
+plt.tight_layout()
+hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_tp5k_{stage}_{k}.png'))
+plt.close()
+
+
 #%% marker genes dynamics for proximal and cell cycle programs
 reload(plotting)
 
-marker_genes = ["Tspan1", "Ccnd2", "Igfbp2", "Igfbp5", "Anxa2",
-                "Cyp2f2", "Scgb1a1", "Scgb3a2", "Cldn10", "Hp", "Krt15", "Nupr1",
-                "Rsph1", "Foxj1", "Dynlrb2", "Fam183b", "Tm4sf1", "Tppp3",
-                "Top2a", "Ube2c", "Ccnb1", "Cdc20", "Cdk1", "Cenpf",
-                "Tyms", "Dek", "Gmnn", "Hells", "Rrm1",
-                "Mki67", "Rrm2", "Lig1"]
-
 marker_genes = [
-"Anxa2",
-"Igfbp5",
-"Tspan1",
-"Ccnd2",
-"Foxj1",
-"Rsph1",
-"Fam183b",
-"Dynlrb2",
-"Tppp3",
-"Tm4sf1",
-"Krt15",
-"Scgb3a2",
-"Cldn10",
-"Nupr1",
-"Cyp2f2",
-"Scgb1a1",
-"Hp",
-"Rrm1",
-"Tyms",
-"Dek",
-"Gmnn",
-"Lig1",
-"Rrm2",
-"Hells",
-"Igfbp2",
-"Cdk1",
-"Top2a",
-"Mki67",
-"Ccnb1",
-"Ube2c",
-"Cenpf",
-"Cdc20",
-]
+    "Anxa2", "Igfbp5", "Tspan1", "Ccnd2", "Foxj1", "Rsph1", "Fam183b", "Dynlrb2",
+    "Tppp3", "Tm4sf1", "Krt15", "Scgb3a2", "Cldn10", "Nupr1", "Cyp2f2",
+    "Scgb1a1", "Hp", "Rrm1", "Tyms", "Dek", "Gmnn", "Lig1", "Rrm2", "Hells",
+    "Igfbp2", "Cdk1", "Top2a", "Mki67", "Ccnb1", "Ube2c", "Cenpf", "Cdc20",]
 
-empty_column = pd.Series(np.zeros(res_a.gene_coefs.shape[0]), index=res_a.gene_coefs.index, name='empty')
+empty_column = pd.Series(np.zeros(res_a.gene_coefs.shape[0]), index=res_a.gene_coefs.index, name='')
+
+
+#%% markder genes coefs dynamics for proximal and cell cycle programs
 
 programs_list = [
     res_a.gene_coefs['E12_Proximal'],
@@ -227,39 +219,34 @@ programs_list = [
     res_c.gene_coefs['E17_CellCycle'],
     ]
 
-
-#%% log average TP5k expression for marker genes
-
-for res, adata in zip([res_a, res_b, res_c, res_d], [adata_a, adata_b, adata_c, adata_d]):
-    X = adata.X.toarray()
-    X = X * 5000. / X.sum(axis=1, keepdims=True)
-    # gene_importance = pd.DataFrame(np.log1p(X.T @ res.norm_usages),
-    #                                index=res.gene_coefs.index, columns=res.gene_coefs.columns)
-    nnls_reg = LinearRegression(positive=True, fit_intercept=False)
-
-    data = nnls_reg.fit(res.norm_usages, X).coef_
-    gene_importance = pd.DataFrame(np.log1p(data),
-                                   index=res.gene_coefs.index, columns=res.gene_coefs.columns)
-    res.gene_importance = gene_importance
-
-    del nnls_reg
-
-#%%
-
 plotting.plot_marker_genes_heatmaps(programs_list, marker_genes, show=False,
                            title='Marker gene coefficients for cell programs',
-                           save_file = zepp_results_dir.joinpath('marker_genes_dynamics_A2.png'))
+                           save_file = zepp_results_dir.joinpath('marker_genes_dynamics.png'))
 
+#%% marker genes TP5k dynamics for proximal and cell cycle programs
 
-#%%
+programs_list = [
+    res_a.gene_importance['E12_Proximal'],
+    res_b.gene_importance['E15_Club_Ciliated'],
+    res_c.gene_importance['E17_Club'],
+    res_d.gene_importance['P3_Club'],
+    res_c.gene_importance['E17_Ciliated'],
+    res_d.gene_importance['P3_Ciliated'],
+    empty_column,
+    res_a.gene_importance['E12_Mphase'],
+    res_b.gene_importance['E15_Mphase'],
+    res_a.gene_importance['E12_Sphase'],
+    res_b.gene_importance['E15_Sphase'],
+    res_c.gene_importance['E17_CellCycle'],
+    ]
 
 # Marker genes heatmap
 df = pd.concat(programs_list, axis=1)
 
 hm = sns.heatmap(df.loc[marker_genes], cmap='BuGn', vmax=3)
-plt.title('Marker genes log-TP5K dynamics')
+plt.title('Marker genes log-TP5K dynamics', y=1.05)
 plt.tight_layout()
-hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_tpm_dynamics_A2.png'))
+hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_tp5k_dynamics.png'))
 plt.close()
 
 #%%
@@ -270,7 +257,7 @@ cm.cax.set_visible(False)
 cm.fig.suptitle('Marker genes log-TP5K dynamics', y=0.85, fontsize=18)
 
 plt.tight_layout()
-cm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_tpm_dynamics_cluster_A2.png'))
+cm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_tp5k_dynamics_cluster.png'))
 plt.close()
 
 
