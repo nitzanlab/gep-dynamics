@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from typing import List, Dict, Iterable, Literal, Optional
+from typing import List, Dict, Iterable, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -152,6 +152,7 @@ def plot_marker_genes_heatmaps(programs_list: List[pd.Series],
                                marker_genes: List[str],
                                marker_gene_names: Optional[List[str]] = None,
                                title: str = None,
+                               figsize: Tuple[int, int] = None,
                                show: bool = False,
                                save_file: _utils.PathLike = None):
     """
@@ -164,6 +165,7 @@ def plot_marker_genes_heatmaps(programs_list: List[pd.Series],
     # create dataframe from the list of series
     df = pd.concat(programs_list, axis=1)
 
+    plt.figure(figsize=figsize)
     sns.heatmap(df.loc[marker_genes], cmap='coolwarm', vmin=-2, vmax=2)
 
     if marker_gene_names is not None:
