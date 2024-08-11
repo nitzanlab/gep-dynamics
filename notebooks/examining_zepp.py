@@ -148,7 +148,6 @@ for index_a, index_b in [(0,3), (4,4), (1,0), (1,1), (2,1), (2,2), (3,2)]:
 
 #%% E15 vs E17
 
-
 for index_b, index_c in [(3,2), (4,2), (0,3), (0,4), (1,1), (2,0), (2,5)]:
     comparator.compare_programs(res_b, index_b, res_c, index_c, comparison_dir, gp=gp)
 
@@ -187,6 +186,17 @@ hm = sns.heatmap(res.gene_importance.loc[marker_genes, col_order], cmap='BuGn', 
 plt.title('Marker genes log-TP5K', y=1.05)
 plt.tight_layout()
 hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_tp5k_{stage}_{k}.png'))
+plt.close()
+
+#%% marker genes for E15 k=7
+
+k=7
+stage = 'E15'
+res = decompositions[stage][k]
+
+hm = sns.heatmap(res.gene_coefs.loc[marker_genes], cmap='coolwarm', vmin=-2, vmax=2)
+plt.tight_layout()
+hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_{stage}_{k}.png'))
 plt.close()
 
 
@@ -246,7 +256,7 @@ df = pd.concat(programs_list, axis=1)
 hm = sns.heatmap(df.loc[marker_genes], cmap='BuGn', vmax=3)
 plt.title('Marker genes log-TP5K dynamics', y=1.05)
 plt.tight_layout()
-hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_tp5k_dynamics.png'))
+hm.figure.savefig(zepp_results_dir.joinpath(f'marker_genes_tp5k_dynamics.png'), dpi=300)
 plt.close()
 
 #%%
@@ -266,8 +276,8 @@ plt.close()
 reload(plotting)
 colors = plotting.PROJ_COLORS_LIST
 
-sets = [(adata_a, res_a, 1, 'E12 Club', colors[0]),
-        (adata_b, res_b, 0, 'E15 Club', colors[1]),
+sets = [(adata_a, res_a, 1, 'E12 Proximal', colors[0]),
+        (adata_b, res_b, 0, 'E15 Club Ciliated', colors[1]),
         (adata_c, res_c, 4, 'E17 Club', colors[2]),
         (adata_d, res_d, 1, 'P3 Club', colors[3]),]
 
@@ -278,8 +288,8 @@ plotting.plot_joint_utilization_projection(sets, title, filename, show=False)
 
 #%% projection of utilization from consecutive stages - ciliated
 
-sets = [(adata_a, res_a, 1, 'E12 Club', colors[0]),
-        (adata_b, res_b, 0, 'E15 Club', colors[1]),
+sets = [(adata_a, res_a, 1, 'E12 Proximal', colors[0]),
+        (adata_b, res_b, 0, 'E15 Club Ciliated', colors[1]),
         (adata_c, res_c, 3, 'E17 Ciliated', colors[2]),
         (adata_d, res_d, 0, 'P3 Ciliated', colors[3]),]
 

@@ -254,10 +254,24 @@ hm = sns.heatmap(df, cmap='BuGn', vmax=10)
 plt.title('Marker genes log-TPM dynamics', y=1.05)
 plt.tight_layout()
 
-hm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_tpm_dynamics.png'))
+hm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_tpm_dynamics.png'), dpi=300)
 plt.close()
 
 #%%
+
+all_gene_coefs = pd.concat([all_res[cat].gene_coefs for cat in categories], axis=1)
+all_gene_coefs.index = adata.var['geneSymbol']
+
+df = all_gene_coefs.loc[marker_genes_symbols]
+
+cm = sns.clustermap(df, cmap='coolwarm', vmin=-2, vmax=2, col_cluster=True,
+                    yticklabels=True, cbar=False, metric='correlation')
+cm.cax.set_visible(False)
+cm.fig.suptitle('Marker genes coefficients clustering', fontsize=18)
+
+plt.tight_layout()
+cm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_coefs_cluster.png'))
+plt.close()
 
 all_gene_importance = pd.concat([all_res[cat].gene_importance for cat in categories], axis=1)
 all_gene_importance.index = adata.var['geneSymbol']
@@ -267,10 +281,10 @@ df = all_gene_importance.loc[marker_genes_symbols]
 cm = sns.clustermap(df, cmap='BuGn', vmax=10, col_cluster=True,
                     yticklabels=True, cbar=False, metric='correlation')
 cm.cax.set_visible(False)
-cm.fig.suptitle('Marker genes log-TPM dynamics', y=0.85, fontsize=18)
+cm.fig.suptitle('Marker genes log-TPM clustering', fontsize=18)
 
 plt.tight_layout()
-cm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_tpm_cluster_orig_markers.png'))
+cm.figure.savefig(marjanovic_results_dir.joinpath(f'marker_genes_tpm_cluster.png'))
 plt.close()
 
 #%% comparing programs pairs

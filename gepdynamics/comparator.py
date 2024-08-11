@@ -1845,6 +1845,9 @@ def compare_programs(res_a: NMFResultBase, index_a: int, res_b: NMFResultBase,
     and optionally performs GSEA.
     """
     save_dir = _utils.set_dir(save_dir)
+    if gprofiler_kwargs is None:
+        gprofiler_kwargs = {}
+
     prefix = f'{res_a.prog_names[index_a]}_vs_{res_b.prog_names[index_b]}'
 
     coefs_a = res_a.gene_coefs[res_a.prog_names[index_a]].copy()
