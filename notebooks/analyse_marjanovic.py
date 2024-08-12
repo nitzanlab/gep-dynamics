@@ -44,6 +44,7 @@ from urllib.request import urlretrieve
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 import scanpy as sc
 
 sc.settings.n_jobs = -1
@@ -55,7 +56,7 @@ print(os.getcwd())
 
 
 # %% [markdown]
-# ### Downloading or loading AnnData object
+# ### 1. Downloading or loading AnnData object
 
 # %%
 results_dir = _utils.set_dir('results')
@@ -125,6 +126,12 @@ else:
 adata
 
 # %%
+adata.obs.timesimple.replace({'01_T_early_ND': '00_All_early', '02_KorKP_early_ND': '00_All_early'}, inplace=True)
+adata.obs['timesimple'].cat.categories
+
+# %%
+
+# %%
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -169,9 +176,10 @@ sc.pl.highest_expr_genes(adata, n_top=20, gene_symbols='geneID')
 # %%
 # rRNA overlapping gene 
 sc.external.pl.phate(adata, color='ENSMUSG00000106106')
+sc.pl.violin(adata, keys='ENSMUSG00000106106', groupby='timesimple')
 
 # %% [markdown]
-# ### Filter genes and plot basic statistics
+# ### 2. Filter genes and plot basic statistics
 # Cells with low number of genes were already filtered
 
 # %%
@@ -256,12 +264,11 @@ else:
 adata
 
 # %% [markdown]
-# ### Splitting the adata by "timesimple"
+# ### 3. Splitting the adata by "timesimple"
 
 # %%
 short_names_dict = {
-    '01_T_early_ND': 'T0',
-    '02_KorKP_early_ND': 'K2',
+    '00_All_early': 'T0',
     '04_K_12w_ND': 'K12',
     '05_K_30w_ND': 'K30',
     '06_KP_12w_ND': 'KP12',
@@ -288,7 +295,6 @@ for cat in categories:
         sc.pp.filter_genes(tmp, min_cells=0)
         sc.pp.filter_genes(tmp, min_counts=0)
         
-        
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
             sc.pp.highly_variable_genes(tmp, flavor='seurat_v3', n_top_genes=5000)
@@ -303,7 +309,7 @@ for cat in categories:
 
 
 # %% [markdown]
-# ### Running multiple NMF iterations
+# ### 4. Running multiple NMF iterations
 
 # %%
 cnmf_dir = _utils.set_dir(results_dir.joinpath('cnmf'))
@@ -325,7 +331,7 @@ for cat in categories:
     # Variance normalized version of the data
     X = _utils.subset_and_normalize_for_nmf(tmp, method='variance_cap')
     
-    c_object.prepare(X, ks, n_iter=120, new_nmf_kwargs={
+    c_object.prepare(X, ks, n_iter=150, new_nmf_kwargs={
         'tol': _constants.NMF_TOLERANCE, 'beta_loss': beta_loss, 'max_iter': 1000})
     
     c_object.factorize(0, 1, gpu=True)
@@ -342,7 +348,7 @@ for cat in categories:
     c_object = cnmf.cNMF(cnmf_dir, cat)
     for thresh in [0.5, 0.4]:
         print(f'working on threshold {thresh}')
-        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=1000, 
+        c_object.k_selection_plot(density_threshold=thresh, nmf_refitting_iters=500, 
                                   consensus_method='mean',
                                   close_fig=True, show_clustering=True, gpu=True)
         # printing the selected knee point
@@ -358,149 +364,42 @@ for cat in categories:
 #
 
 # %%
-selected_cnmf_params = {
-    '01_T_early_ND': (2, 0.5),
-    '02_KorKP_early_ND': (4, 0.5),
-    '04_K_12w_ND': (4, 0.5),
-    '05_K_30w_ND': (4, 0.5),
-    '06_KP_12w_ND': (5, 0.5),
-    '07_KP_20w_ND': (5, 0.5),
-    '08_KP_30w_ND': (5, 0.5)}
-
-selected_cnmf_params
-
-# %%
-# %%time
-
-split_adatas = {}
-decompositions = {}
-
-for cat, (k, threshold) in selected_cnmf_params.items():
-    print(f'Working on {cat} with k={k} and threshold={threshold}')
-    tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
-    
-    c_object = cnmf.cNMF(cnmf_dir, cat)
-    c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
-                       consensus_method='mean',
-                       nmf_refitting_iters=1000, show_clustering=False)
-
-    usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
-    
-    tmp.uns['cnmf_params'] = {'k_nmf': k, 'threshold': threshold}
-
-    # X ~ W @ H, transpose for cells to be columns
-    loss_per_cell = pfnmf.calc_beta_divergence(
-        c_object.X.T, W = spectra.T, H = usages.T, beta_loss=beta_loss, per_column=True)
-
-    res = comparator.NMFResult(
-        name=f'{tmp.uns["sname"]}_k{k}',
-        loss_per_cell=loss_per_cell,
-        rank=k,
-        W=usages,
-        H=spectra)
-    
-    comparator.NMFResultBase.calculate_gene_coefficients_list(
-        tmp, [res], target_sum=tpm_target_sum, target_variance=tmp.var['variances_norm'].values)
-    
-    decompositions[cat] = {k: res}
-
-    tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
-
-    
-    # restoring h5ad trouble saving element
-    tmp.uns['clusterK12_colors_dict'] = dict(zip(tmp.obs['clusterK12'].cat.categories, tmp.uns['clusterK12_colors']))
-
-    split_adatas[cat] = tmp
-    print()
-
-# %%
-np.savez(results_dir.joinpath('decompositions.npz'), obj=decompositions)
-
-# %% [markdown]
-# #### Reloading the results
-
-# %% Loading GEPs adatas
-# %%time
-
-column_of_interest = 'timesimple'
-categories = adata.obs[column_of_interest].cat.categories
-
-color_obs_by = 'clusterK12'
-
 if 'split_adatas' not in globals():
+    print('creating split_adatas')
+    
     split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
-
     split_adatas = {}
+    
     for cat in categories:
         tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
+        
         # restoring h5ad trouble saving element
         tmp.uns['clusterK12_colors_dict'] = dict(zip(tmp.obs['clusterK12'].cat.categories, tmp.uns['clusterK12_colors']))
-    
+        
         split_adatas[cat] = tmp
 
 if 'decompositions' not in globals():
-    decompositions = np.load(results_dir.joinpath('decompositions.npz'), allow_pickle=True)['obj'].item()
-
-# %% [markdown]
-# ### Examening results
-
-# %%
-for cat in categories:
-    print(cat)
-    res = decompositions[cat][split_adatas[cat].uns['cnmf_params']['k_nmf']]
-    with np.printoptions(precision=2, suppress=False):
-        print(res.prog_percentages)
-
-# %%
-color_obs_by = 'clusterK12'
-decomposition_images = _utils.set_dir(split_adatas_dir.joinpath("images"))
-
-with warnings.catch_warnings():  # supress scanpy plotting warning
-    warnings.simplefilter(action='ignore', category=UserWarning)
-    warnings.simplefilter(action='ignore', category=FutureWarning)
-
+    decompositions = {}
     for cat in categories:
-        tmp = split_adatas[cat]
-        k = tmp.uns['cnmf_params']['k_nmf']
-        res = decompositions[cat][k]
-        
-        # Phate
-        um = sc.external.pl.phate(tmp, color=color_obs_by, s=10, return_fig=True, title=f'{cat}')
-        plt.tight_layout()
-        um.savefig(decomposition_images.joinpath(f"{cat}_phate_{color_obs_by}.png"), dpi=300)
-        plt.close(um)
+        decompositions[cat] = {}
 
-        # usages clustermap
-        un_sns = _utils.plot_usages_norm_clustermaps(
-            tmp, normalized_usages=res.norm_usages, prog_names=res.prog_names,
-            title=f'{cat}', show=False, sns_clustermap_params={
-                'row_colors': tmp.obs[color_obs_by].map(tmp.uns[f'{color_obs_by}_colors_dict'])})
-        un_sns.savefig(decomposition_images.joinpath(f"{cat}_usages_norm.png"),
-                       dpi=180, bbox_inches='tight')
-        plt.close(un_sns.fig)
-
-        # usages violin plot
-        _utils.plot_usages_norm_violin(
-            tmp, color_obs_by, normalized_usages=res.norm_usages, prog_names=res.prog_names,
-            save_path=decomposition_images.joinpath(
-                f'{cat}_norm_usage_per_lineage.png'))
 
 # %% [markdown]
-# ### Examining programs dynamics by rank
+# #### Examining programs dynamics by rank
 #
 
 # %%
 # %%time
+threshold = 0.5
 
 k_min = 2
-k_max = 7
+k_max = 8
 
 for cat in categories:
     print(f'Working on {cat}')
     tmp = split_adatas[cat]
     
     c_object = cnmf.cNMF(cnmf_dir, cat)
-    threshold = tmp.uns['cnmf_params']['threshold']
     
     for k in range(k_min, k_max + 1):
         if k in decompositions[cat].keys():
@@ -535,11 +434,13 @@ for cat in categories:
     
     print()
 
+np.savez(results_dir.joinpath('decompositions.npz'), obj=decompositions)
+
 # %%
 decomposition_images = _utils.set_dir(split_adatas_dir.joinpath("images"))
 
 tsc_threshold: float = 0.3
-tsc_truncation_level: int = 1000
+tsc_truncation_level: int = 500
 
 for cat in categories:
     results = [decompositions[cat][i] for i in range(k_min, k_max + 1)]
@@ -564,9 +465,173 @@ for cat in categories:
     
     fig.savefig(decomposition_images.joinpath(genes_filename))
     
-    plt.show()
     plt.close()
 
+    # CDF of correlations
+    plt.ecdf(tsc.flatten())
+    plt.title(f'{cat}_flow_correlations_CDF.png')
+    plt.savefig(decomposition_images.joinpath(f'{cat}_flow_correlations_CDF.png'))
+    plt.close()
+
+
+# %%
+color_obs_by = 'clusterK12'
+
+# Proximal: "Sox2", "Tspan1"
+# Club: "Cyp2f2", "Scgb3a1",
+# Ciliated: "Rsph1", "Foxj1"
+# Distal: "Sox9", "Hopx"
+# AT1: "Timp3", 'Aqp5'  
+# AT2: 'Sftpa1', 'Sftpb'
+# Cell Cycle: "Mki67", "Cdkn3", "Rrm2", "Lig1"
+# Lineage markers: "Fxyd3", "Epcam", "Elf3", "Col1a2", "Dcn", "Mfap4", "Cd53", "Coro1a", "Ptprc", "Cldn5", "Clec14a", "Ecscr" 
+
+marker_genes_symbols = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a1", "Rsph1", "Foxj1",
+                        "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
+                        "Mki67", "Cdkn3", "Rrm2", "Lig1", "H2-Aa", "H2-Ab1",
+                        "Fxyd3", "Epcam", "Elf3", "Col1a2", "Dcn", "Mfap4",
+                        "Cd53", "Coro1a", "Ptprc", "Cldn5", "Clec14a", "Ecscr"]
+
+marker_genes_ID = [adata.var.index[adata.var['geneSymbol'] == gene].tolist()[0] for gene in marker_genes_symbols]
+
+
+with warnings.catch_warnings():  # supress plotting warnings
+    warnings.simplefilter(action='ignore', category=UserWarning)
+
+    for cat in categories:
+        tmp = split_adatas[cat]
+        for k in range(k_min, k_max + 1):
+            res = decompositions[cat][k]
+    
+            # usages clustermap
+            un_sns = _utils.plot_usages_norm_clustermaps(
+                tmp, normalized_usages=res.norm_usages, prog_names=res.prog_names,
+                title=f'{cat}', show=False, sns_clustermap_params={
+                    'row_colors': tmp.obs[color_obs_by].map(tmp.uns[f'{color_obs_by}_colors_dict'])})
+            un_sns.savefig(decomposition_images.joinpath(f"{cat}_{k}_usages_norm.png"),
+                           dpi=180, bbox_inches='tight')
+            plt.close(un_sns.fig)
+    
+            # usages violin plot
+            _utils.plot_usages_norm_violin(
+                tmp, color_obs_by, normalized_usages=res.norm_usages, prog_names=res.prog_names,
+                save_path=decomposition_images.joinpath(
+                    f'{cat}_{k}_norm_usage_per_lineage.png'))
+
+            # Marker genes heatmap
+            heatmap_data = res.gene_coefs.loc[marker_genes_ID]
+            hm = sns.heatmap(heatmap_data, cmap='coolwarm', vmin=-2, vmax=2)
+
+            plt.yticks(0.5 + np.arange(len(marker_genes_symbols)), marker_genes_symbols)
+
+            plt.title(f'Marker genes coefficients for {res.name}')
+            plt.tight_layout()
+            
+            hm.figure.savefig(decomposition_images.joinpath(f'{cat}_{k}_marker_genes.png'))
+            plt.close()
+
+        # Phate
+        um = sc.external.pl.phate(tmp, color=color_obs_by, s=10, return_fig=True, title=f'{cat}')
+        plt.tight_layout()
+        um.savefig(decomposition_images.joinpath(f"{cat}_phate_{color_obs_by}.png"), dpi=300)
+        plt.close(um)
+
+# %% [markdown]
+# #### selecting final parameters
+
+# %%
+selected_cnmf_params = {
+    '00_All_early': (4, 0.5),
+    '04_K_12w_ND': (4, 0.5),
+    '05_K_30w_ND': (4, 0.5),
+    '06_KP_12w_ND': (5, 0.5),
+    '07_KP_20w_ND': (5, 0.5),
+    '08_KP_30w_ND': (6, 0.5)}
+
+selected_cnmf_params
+
+# %%
+# %%time
+
+
+for cat, (k, threshold) in selected_cnmf_params.items():
+    print(f'Working on {cat} with k={k} and threshold={threshold}')
+    tmp = split_adatas[cat]
+
+    if k not in decompositions[cat].keys():
+        c_object = cnmf.cNMF(cnmf_dir, cat)
+        c_object.consensus(k, density_threshold=threshold, gpu=True, verbose=True,
+                           consensus_method='mean',
+                           nmf_refitting_iters=1000, show_clustering=False)
+    
+        usages, spectra = c_object.get_consensus_usages_spectra(k, density_threshold=threshold)
+        
+        # X ~ W @ H, transpose for cells to be columns
+        loss_per_cell = pfnmf.calc_beta_divergence(
+            c_object.X.T, W = spectra.T, H = usages.T, beta_loss=beta_loss, per_column=True)
+    
+        res = comparator.NMFResult(
+            name=f'{tmp.uns["sname"]}_k{k}',
+            loss_per_cell=loss_per_cell,
+            rank=k,
+            W=usages,
+            H=spectra)
+            
+        comparator.NMFResultBase.calculate_gene_coefficients_list(
+            tmp, [res], target_sum=tpm_target_sum, target_variance=tmp.var['variances_norm'].values)
+        
+        decompositions[cat][k] = res
+
+    tmp.uns['cnmf_params'] = {'k_nmf': k, 'threshold': threshold}
+
+    # Saving
+    # Removing h5ad trouble saving element before saving
+    tmp.uns.pop('clusterK12_colors_dict', None)
+    
+    tmp.write_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
+
+    # restoring h5ad trouble saving element
+    tmp.uns['clusterK12_colors_dict'] = dict(zip(tmp.obs['clusterK12'].cat.categories, tmp.uns['clusterK12_colors']))
+        
+    print()
+
+# %%
+np.savez(results_dir.joinpath('decompositions.npz'), obj=decompositions)
+
+# %% [markdown]
+# #### Reloading the results
+
+# %% Loading GEPs adatas
+# %%time
+
+column_of_interest = 'timesimple'
+categories = adata.obs[column_of_interest].cat.categories
+
+color_obs_by = 'clusterK12'
+
+if 'split_adatas' not in globals():
+    split_adatas_dir = _utils.set_dir(results_dir.joinpath(f'split_{column_of_interest}'))
+
+    split_adatas = {}
+    for cat in categories:
+        tmp = sc.read_h5ad(split_adatas_dir.joinpath(f'{cat}.h5ad'))
+        # restoring h5ad trouble saving element
+        tmp.uns['clusterK12_colors_dict'] = dict(zip(tmp.obs['clusterK12'].cat.categories, tmp.uns['clusterK12_colors']))
+    
+        split_adatas[cat] = tmp
+
+if 'decompositions' not in globals():
+    decompositions = np.load(results_dir.joinpath('decompositions.npz'), allow_pickle=True)['obj'].item()
+
+# %% [markdown]
+# #### Examening results
+
+# %%
+for cat in categories:
+    print(cat)
+    res = decompositions[cat][split_adatas[cat].uns['cnmf_params']['k_nmf']]
+    with np.printoptions(precision=2, suppress=False):
+        print(res.prog_percentages)
 
 # %% [markdown]
 # ## 6. Running comparator on the data
@@ -582,14 +647,25 @@ for cat in categories:
         tmp.obs[field_1].map(tmp.uns[f'{field_1}_colors_dict']),
         ], axis=1)
 
-pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[4,5]]]
 
+
+# %%
+categories
 
 # %%
 # %%time
 
-pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[3,6]], categories[[4,5]], categories[[5,6]]]
+pairs = [(categories[i], categories[i + 1]) for i in range(len(categories) - 1)]
 pairs.extend((j, i) for i, j in pairs[::-1])
+
+marker_genes_symbols = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a1", "Rsph1", "Foxj1",
+                        "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
+                        "Mki67", "Cdkn3", "Rrm2", "Lig1", "H2-Aa", "H2-Ab1",
+                        "Fxyd3", "Epcam", "Elf3", "Col1a2", "Dcn", "Mfap4",
+                        "Cd53", "Coro1a", "Ptprc", "Cldn5", "Clec14a", "Ecscr"]
+
+marker_genes_ID = [adata.var.index[adata.var['geneSymbol'] == gene].tolist()[0] for gene in marker_genes_symbols]
+
 
 for cat_a, cat_b in pairs:
     print(f'comparing {cat_a} and {cat_b}')
@@ -609,7 +685,7 @@ for cat_a, cat_b in pairs:
             highly_variable_genes_key='joint_highly_variable',
             adata_b=adata_b, usages_matrix_b=decompositions[cat_b][adata_b.uns['cnmf_params']['k_nmf']],
             tpm_target_sum=tpm_target_sum,
-            nmf_engine='torchnmf', device='cuda', max_nmf_iter=1000, verbosity=1,
+            nmf_engine='torchnmf', device='cuda', max_nmf_iter=500, verbosity=1,
             decomposition_normalization_method='variance_cap',
             coefs_variance_normalization='variances_norm')
     
@@ -673,6 +749,8 @@ for cat_a, cat_b in pairs:
                  gprofiler_kwargs=dict(organism='mmusculus',
                                        sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
 
+    cmp.plot_marker_genes_heatmaps(marker_genes_ID, marker_genes_symbols)
+    
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=FutureWarning)
         warnings.filterwarnings("ignore", category=UserWarning)
@@ -681,11 +759,6 @@ for cat_a, cat_b in pairs:
 
 
 # %%
-marker_genes_symbols = ["Sox2", "Tspan1", "Cyp2f2", "Scgb3a1", "Rsph1", "Foxj1",
-               "Sox9", "Hopx", "Timp3", 'Aqp5', 'Sftpa1', 'Sftpb',
-               "Mki67", "Cdkn3", "Rrm2", "Lig1"]
-
-marker_genes_ID = [adata.var.index[adata.var['geneSymbol'] == gene].tolist()[0] for gene in marker_genes_symbols]
 
 for cat_a, cat_b in pairs:
     print(f'comparing {cat_a} and {cat_b}')
@@ -698,26 +771,4 @@ for cat_a, cat_b in pairs:
     
     cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
     
-    cmp.plot_marker_genes_heatmaps(marker_genes_ID, marker_genes_symbols)
     break
-
-# %%
-
-pairs = [categories[[2,3]], categories[[2,4]], categories[[3,4]], categories[[3,5]], categories[[3,6]], categories[[4,5]], categories[[5,6]]]
-pairs.extend((j, i) for i, j in pairs[::-1])
-
-for cat_a, cat_b in pairs:
-    print(f'comparing {cat_a} and {cat_b}')
-    
-    adata_a = split_adatas[cat_a]
-    adata_b = split_adatas[cat_b]
-    
-    comparison_dir = _utils.set_dir(results_dir.joinpath(
-        f"comparator_{adata_a.uns['sname']}_{adata_b.uns['sname']}"))
-    
-    cmp = comparator.Comparator.load_from_file(comparison_dir.joinpath('comparator.npz'), adata_a, adata_b)
-    
-    print('running GSEA')
-    cmp.run_gsea(gene_ids_column_number=2, 
-                 gprofiler_kwargs=dict(organism='mmusculus',
-                                       sources=['GO:BP', 'WP', 'REAC', 'KEGG']))
